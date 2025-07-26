@@ -45,9 +45,18 @@ export default async function handler(req, res) {
         }
 
         // Delete the file from the bucket
+        let storagePath = recording.audio_file_path;
+        if (!storagePath) {
+            return res.status(400).json({ error: 'No audio file associated with this recording.' });
+        }
+        if (!storagePath.startsWith('audio-files/')) {
+            return res.status(400).json({ error: 'Unhandled audio file path: ' + storagePath });
+        }
+        storagePath = storagePath.replace('audio-files/', ''); // Remove the prefix for deletion
+        // console.log('Deleting audio file at path:', storagePath);
         const { error: fileDeleteError } = await supabase.storage
             .from('audio-files')
-            .remove([recording.audio_file_path]);
+            .remove([storagePath]);
         if (fileDeleteError) {
             return res.status(500).json({ error: fileDeleteError.message });
         }

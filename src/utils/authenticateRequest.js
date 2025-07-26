@@ -9,7 +9,7 @@ export async function authenticateRequest(req) {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.replace('Bearer ', '');
   if (!token) {
-    return { user: null, error: 'Token is required' };
+    return { user: null, error: 'JWT Token is required' };
   }
   return await verifyToken(token);
 }
