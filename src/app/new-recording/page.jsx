@@ -41,15 +41,34 @@ export default function NewRecording() {
     billingSuggestion: "emscribe_billingSuggestion",
   };
 
-  // Restore from localStorage on mount
+  // Restore from localStorage on mount and enable Section 2 if any field exists
   React.useEffect(() => {
-    setPatientEncounterName(localStorage.getItem(LS_KEYS.patientEncounterName) || "");
-    setTranscript(localStorage.getItem(LS_KEYS.transcript) || "");
-    setSoapSubjective(localStorage.getItem(LS_KEYS.soapSubjective) || "");
-    setSoapObjective(localStorage.getItem(LS_KEYS.soapObjective) || "");
-    setSoapAssessment(localStorage.getItem(LS_KEYS.soapAssessment) || "");
-    setSoapPlan(localStorage.getItem(LS_KEYS.soapPlan) || "");
-    setBillingSuggestion(localStorage.getItem(LS_KEYS.billingSuggestion) || "");
+    const name = localStorage.getItem(LS_KEYS.patientEncounterName) || "";
+    const transcript = localStorage.getItem(LS_KEYS.transcript) || "";
+    const subjective = localStorage.getItem(LS_KEYS.soapSubjective) || "";
+    const objective = localStorage.getItem(LS_KEYS.soapObjective) || "";
+    const assessment = localStorage.getItem(LS_KEYS.soapAssessment) || "";
+    const plan = localStorage.getItem(LS_KEYS.soapPlan) || "";
+    const billing = localStorage.getItem(LS_KEYS.billingSuggestion) || "";
+    setPatientEncounterName(name);
+    setTranscript(transcript);
+    setSoapSubjective(subjective);
+    setSoapObjective(objective);
+    setSoapAssessment(assessment);
+    setSoapPlan(plan);
+    setBillingSuggestion(billing);
+    // If any field has data, enable section 2
+    if (
+      name.trim() ||
+      transcript.trim() ||
+      subjective.trim() ||
+      objective.trim() ||
+      assessment.trim() ||
+      plan.trim() ||
+      billing.trim()
+    ) {
+      setSoapNoteRequested(true);
+    }
   }, []);
 
   // Save to localStorage on change
