@@ -66,7 +66,7 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                                     medications: { type: SchemaType.STRING, description: "Current medications" },
                                     allergies: { type: SchemaType.STRING, description: "Known allergies" }
                                 },
-                                required: ["chief_complaint", "hpi", "history", "ros", "medications", "allergies"]
+                                required: ["chief_complaint", "hpi", "history", "ros", "medications", "allergies"],
                             },
                             objective: {
                                 type: SchemaType.OBJECT,
@@ -89,7 +89,9 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                                 description: "Treatment plan, medications, follow-up instructions and next steps"
                             }
                         },
-                        required: ["subjective", "objective", "assessment", "plan"]
+                        required: ["subjective", "objective", "assessment", "plan"],
+                        propertyOrdering: ["subjective", "objective", "assessment", "plan"]
+
                     },
                     billingSuggestion: {
                         type: SchemaType.OBJECT,
@@ -99,7 +101,8 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                             cpt: { type: SchemaType.STRING, description: "CPT codes for the services provided, with justification. Also note if new/established patient, etc." },
                             additional_inquiries: { type: SchemaType.STRING, description: "Additional patient inquiries to pursue to increase billing level" }
                         },
-                        required: ["icd10", "cpt", "additional_inquiries"]
+                        required: ["icd10", "cpt", "additional_inquiries"],
+                        propertyOrdering: ["icd10", "cpt", "additional_inquiries"]
                     }
                 },
                 required: ["soapNote", "billingSuggestion"]

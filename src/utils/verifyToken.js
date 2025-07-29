@@ -15,6 +15,7 @@ export async function verifyToken(token) {
     // console.log('Token verification error:', error, data);
     return { user: null, error: 'Invalid or expired token' };
   }
+  // console.log('Token verified successfully:', data.user);
 
   return { user: data.user, error: null };
 }

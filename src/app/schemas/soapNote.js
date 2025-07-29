@@ -8,11 +8,17 @@ export const soapNoteSchema = z.object({
   updated_at: z.string().regex(isoDatetimeRegex, 'Invalid ISO datetime').default(() => new Date().toISOString()).optional(),
   user_id: z.string().regex(uuidRegex, 'Invalid UUID').optional(),
   transcript_id: z.number().int().optional(), // int8 in SQL, optional for auto-increment
-  chief_complaint: z.string().nullable(),
   soapNote_text: z.object({
-    subjective: z.string(),
-    objective: z.string(),
-    assessment: z.string(),
-    plan: z.string()
+    soapNote: z.object({
+      subjective: z.string(),
+      objective: z.string(),
+      assessment: z.string(),
+      plan: z.string(),
+    }),
+    billingSuggestion: z.object({
+      icd10: z.string().optional(),
+      cpt: z.string().optional(),
+      additional_inquiries: z.string().optional(),
+    }).optional(),
   }).nullable() // jsonb, can be more specific if you know the structure
 });

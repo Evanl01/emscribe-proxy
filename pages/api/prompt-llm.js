@@ -134,7 +134,7 @@ export default async function handler(req, res) {
             return;
         });
 
-        console.log('Transcript Result:', transcriptResult);
+        // console.log('Transcript Result:', transcriptResult);
         // console.log('Upload Result:', uploadResult);
 
 
@@ -158,7 +158,7 @@ export default async function handler(req, res) {
             return;
         });
 
-        console.log('SOAP Note and Billing Result:', soapNoteAndBillingResult);
+        // console.log('SOAP Note and Billing Result:', soapNoteAndBillingResult);
 
         response.status = 'soap note complete';
         response.message = 'SOAP note and billing suggestion created successfully!';
