@@ -1,5 +1,5 @@
 "use client";
-import React, { use, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
