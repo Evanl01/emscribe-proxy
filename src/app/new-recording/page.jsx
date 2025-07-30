@@ -1,11 +1,13 @@
 "use client";
 import { useRouter } from "next/navigation";
-import React, { useState, useRef } from "react";
-import { getJWT } from "public/scripts/api.js";
-import {
-  cleanMarkdownText,
-  formatMarkdownText,
-} from "public/scripts/format.js";
+import React, { useState, useRef, useEffect } from "react";
+import * as api from '@/public/scripts/api.js';
+import * as ui from '@/public/scripts/ui.js';
+import * as format from '@/public/scripts/format.js';
+import * as validation from '@/public/scripts/validation.js';
+// import * as auth  from "@/src/utils/Auth.jsx";
+import Auth from "@/src/utils/Auth.jsx";
+
 
 export default function NewRecording() {
   const router = useRouter();
@@ -40,9 +42,8 @@ export default function NewRecording() {
     soapPlan: "emscribe_soapPlan",
     billingSuggestion: "emscribe_billingSuggestion",
   };
-
   // Restore from localStorage on mount and enable Section 2 if any field exists
-  React.useEffect(() => {
+  useEffect(() => {
     const name = localStorage.getItem(LS_KEYS.patientEncounterName) || "";
     const transcript = localStorage.getItem(LS_KEYS.transcript) || "";
     const subjective = localStorage.getItem(LS_KEYS.soapSubjective) || "";
@@ -72,25 +73,25 @@ export default function NewRecording() {
   }, []);
 
   // Save to localStorage on change
-  React.useEffect(() => {
+  useEffect(() => {
     localStorage.setItem(LS_KEYS.patientEncounterName, patientEncounterName);
   }, [patientEncounterName]);
-  React.useEffect(() => {
+  useEffect(() => {
     localStorage.setItem(LS_KEYS.transcript, transcript);
   }, [transcript]);
-  React.useEffect(() => {
+  useEffect(() => {
     localStorage.setItem(LS_KEYS.soapSubjective, soapSubjective);
   }, [soapSubjective]);
-  React.useEffect(() => {
+  useEffect(() => {
     localStorage.setItem(LS_KEYS.soapObjective, soapObjective);
   }, [soapObjective]);
-  React.useEffect(() => {
+  useEffect(() => {
     localStorage.setItem(LS_KEYS.soapAssessment, soapAssessment);
   }, [soapAssessment]);
-  React.useEffect(() => {
+  useEffect(() => {
     localStorage.setItem(LS_KEYS.soapPlan, soapPlan);
   }, [soapPlan]);
-  React.useEffect(() => {
+  useEffect(() => {
     localStorage.setItem(LS_KEYS.billingSuggestion, billingSuggestion);
   }, [billingSuggestion]);
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -428,7 +429,7 @@ export default function NewRecording() {
       formData.append("audio_file", recordingFile);
 
       const response = await fetch("/api/prompt-llm", {
-        headers: { Authorization: `Bearer ${getJWT()}` },
+        headers: { Authorization: `Bearer ${api.getJWT()}` },
         method: "POST",
         body: formData,
       });
@@ -483,26 +484,28 @@ export default function NewRecording() {
                 ) {
                   // Set S/O/A/P fields individually
                   if (jsonData.data.soapNote) {
+                    
                     const note = jsonData.data.soapNote;
-                    let soapSubjectiveText = cleanMarkdownText(
+                    console.log("SOAP Note data:", note);
+                    let soapSubjectiveText = format.cleanMarkdownText(
                       "",
                       note.subjective,
                       0,
                       "1.25em"
                     );
-                    let soapObjectiveText = cleanMarkdownText(
+                    let soapObjectiveText = format.cleanMarkdownText(
                       "",
                       note.objective,
                       0,
                       "1.25em"
                     );
-                    let soapAssessmentText = cleanMarkdownText(
+                    let soapAssessmentText = format.cleanMarkdownText(
                       "",
                       note.assessment,
                       0,
                       "1.25em"
                     );
-                    let soapPlanText = cleanMarkdownText(
+                    let soapPlanText = format.cleanMarkdownText(
                       "",
                       note.plan,
                       0,
@@ -516,7 +519,7 @@ export default function NewRecording() {
 
                   // Format Billing Suggestion: pass the entire object to formatMarkdownText
                   if (jsonData.data.billingSuggestion) {
-                    let billingText = cleanMarkdownText(
+                    let billingText = format.cleanMarkdownText(
                       "",
                       jsonData.data.billingSuggestion,
                       0,
@@ -607,13 +610,13 @@ export default function NewRecording() {
     //         jsonData.data?.soapNote
     //       ) {
     //         // Format SOAP Note: pass the entire object to formatMarkdownText
-    //         let soapNoteText = formatMarkdownText('', jsonData.data.soapNote, 0, "1.25em");
+    //         let soapNoteText = format.formatMarkdownText('', jsonData.data.soapNote, 0, "1.25em");
     //         setSoapNote(soapNoteText);
 
-    //         // Format Billing Suggestion: pass the entire object to formatMarkdownText
+    //         // Format Billing Suggestion: pass the entire object to format.formatMarkdownText
     //         console.log("Billing suggestion data:", jsonData.data.billingSuggestion);
     //         if (jsonData.data.billingSuggestion) {
-    //           let billingText = formatMarkdownText('', jsonData.data.billingSuggestion, 0, "1.25em");
+    //           let billingText = format.formatMarkdownText('', jsonData.data.billingSuggestion, 0, "1.25em");
     //           setBillingSuggestion(billingText);
     //         }
 
@@ -700,7 +703,7 @@ export default function NewRecording() {
       const response = await fetch("/api/patient-encounters/complete", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${getJWT()}`,
+          Authorization: `Bearer ${api.getJWT()}`,
         },
         body: formData,
       });
@@ -744,7 +747,9 @@ export default function NewRecording() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
+    <>
+      <Auth />
+      <div className="max-w-4xl mx-auto p-6">
       <h1 className="text-3xl font-bold mb-8">New Recording</h1>
 
       {/* Section 1: Upload/Record */}
@@ -991,7 +996,7 @@ export default function NewRecording() {
                 value={transcript}
                 onChange={(e) => setTranscript(e.target.value)}
                 disabled={isSaving}
-                className={`w-full h-80 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
+                className={`w-full h-100 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
                   saveAttempted && !transcript.trim()
                     ? "border-red-500"
                     : "border-gray-300"
@@ -1013,7 +1018,7 @@ export default function NewRecording() {
                 value={soapSubjective}
                 onChange={(e) => setSoapSubjective(e.target.value)}
                 disabled={isSaving}
-                className={`w-full h-32 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
+                className={`w-full h-80 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
                   saveAttempted && !soapSubjective.trim()
                     ? "border-red-500"
                     : "border-gray-300"
@@ -1033,7 +1038,7 @@ export default function NewRecording() {
                 value={soapObjective}
                 onChange={(e) => setSoapObjective(e.target.value)}
                 disabled={isSaving}
-                className={`w-full h-32 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
+                className={`w-full h-80 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
                   saveAttempted && !soapObjective.trim()
                     ? "border-red-500"
                     : "border-gray-300"
@@ -1053,7 +1058,7 @@ export default function NewRecording() {
                 value={soapAssessment}
                 onChange={(e) => setSoapAssessment(e.target.value)}
                 disabled={isSaving}
-                className={`w-full h-32 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
+                className={`w-full h-50 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
                   saveAttempted && !soapAssessment.trim()
                     ? "border-red-500"
                     : "border-gray-300"
@@ -1073,7 +1078,7 @@ export default function NewRecording() {
                 value={soapPlan}
                 onChange={(e) => setSoapPlan(e.target.value)}
                 disabled={isSaving}
-                className={`w-full h-32 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
+                className={`w-full h-50 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
                   saveAttempted && !soapPlan.trim()
                     ? "border-red-500"
                     : "border-gray-300"
@@ -1128,6 +1133,7 @@ export default function NewRecording() {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }

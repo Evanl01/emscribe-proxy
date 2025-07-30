@@ -19,6 +19,7 @@ export default async function handler(req, res) {
         }
 
         if (action === 'sign-up') {
+        // JWT validity check endpoint
             const userId = await getUserIdByEmail(email);
             if (!userId || userId === null) {
                 return res.status(400).json({ error: 'Email already exists.' });
@@ -31,6 +32,17 @@ export default async function handler(req, res) {
                 return res.status(400).json({ error: 'Unhandled sign-up error' });
             }
             return res.status(201).json({ token: data.session.access_token });
+        }
+
+        if (action === 'check-validity') {
+            const authHeader = req.headers.authorization || '';
+            const token = authHeader.replace('Bearer ', '');
+            if (!token) return res.status(400).json({ error: 'Token is required for check' });
+
+            const { user, error: verifyError } = await verifyToken(token);
+            if (verifyError) return res.status(401).json({ error: verifyError });
+            // Optionally return user info or just success
+            return res.status(200).json({ valid: true, user });
         }
 
         if (action === 'sign-in') {

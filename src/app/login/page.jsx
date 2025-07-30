@@ -1,6 +1,10 @@
 "use client";
-import { useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
+import * as api from "@/public/scripts/api.js";
+import * as ui from "@/public/scripts/ui.js";
+import * as format from "@/public/scripts/format.js";
+import * as validation from "@/public/scripts/validation.js";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -21,7 +25,7 @@ export default function LoginPage() {
       const response = await fetch("/api/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "sign-in", email, password })
+        body: JSON.stringify({ action: "sign-in", email, password }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -30,11 +34,14 @@ export default function LoginPage() {
       // Save JWT to localStorage for website access (best practice: only store JWT, not userEmail)
       window.localStorage.setItem("jwt", data.token);
       // Notify extension content script (if present) via window.postMessage
-      window.postMessage({
-        type: "EMSCRIBE_LOGIN",
-        jwt: data.token,
-        userEmail: email
-      }, "*");
+      window.postMessage(
+        {
+          type: "EMSCRIBE_LOGIN",
+          jwt: data.token,
+          userEmail: email,
+        },
+        "*"
+      );
       router.push("/new-recording");
     } catch (err) {
       setError(err.message);
@@ -57,7 +64,9 @@ export default function LoginPage() {
       `}</style>
       <div className="login-container">
         <h2>Login to EmScribe</h2>
-        <div className="error" id="error">{error}</div>
+        <div className="error" id="error">
+          {error}
+        </div>
         <form onSubmit={handleLogin}>
           <input
             type="email"
@@ -65,7 +74,7 @@ export default function LoginPage() {
             placeholder="Email"
             required
             value={email}
-            onChange={e => setEmail(e.target.value)}
+            onChange={(e) => setEmail(e.target.value)}
             disabled={loading}
           />
           <input
@@ -74,7 +83,7 @@ export default function LoginPage() {
             placeholder="Password"
             required
             value={password}
-            onChange={e => setPassword(e.target.value)}
+            onChange={(e) => setPassword(e.target.value)}
             disabled={loading}
           />
           <button id="loginBtn" type="submit" disabled={loading}>

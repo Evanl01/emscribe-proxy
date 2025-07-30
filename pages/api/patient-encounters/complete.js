@@ -216,7 +216,21 @@ export default async function handler(req, res) {
                 console.error('API error: Recording schema validation failed', recordingSchemaResult.error);
                 throw new Error('Recording schema validation failed: ' + recordingSchemaResult.error.message);
             }
+            
             recording = recordingSchemaResult.data;
+            //Check if duplicate recording name exists
+            const { data: existingRecording, error: nameCheckError } = await supabase
+                .from('recordings')
+                .select('id')
+                .eq('user_id', user.id)
+                .eq('name', recording.name)
+                .maybeSingle();
+
+            if (nameCheckError) {
+                console.error('API error: Recording name check failed', nameCheckError);
+                throw new Error('Recording name check failed: ' + nameCheckError.message);
+            }
+
             const recRes = await supabase
                 .from('recordings')
                 .insert([recording])

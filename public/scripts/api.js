@@ -11,7 +11,7 @@ export const getJWT = () => {
 export const getAllTranscripts = async () => {
   const jwt = getJWT();
   try {
-    const res = await fetch(`${API_BASE}/api/transcripts`, {
+    const res = await fetch(`${API_BASE}/api/transcripts/batch`, {
       headers: { 'Authorization': `Bearer ${jwt}` }
     });
     
