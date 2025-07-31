@@ -290,6 +290,11 @@ export default function NewRecording() {
 
   // Handle file upload
   const handleFileUpload = async (event) => {
+    // Clear old recording file from localStorage and reset local variable
+    localStorage.removeItem("emscribe_audioFileMetadata");
+    setRecordingFile(null);
+    setRecordingDuration(0);
+
     const file = event.target.files && event.target.files[0];
     if (!file) return;
 
@@ -319,16 +324,16 @@ export default function NewRecording() {
         return;
       }
       const userEmail = user.email;
-    // Get extension from uploaded file name
-    // Always derive extension from uploaded file name, fallback to empty string if not found
-    const originalName = file.name || "audio";
-    const lastDot = originalName.lastIndexOf(".");
-    const extension = lastDot !== -1 ? originalName.substring(lastDot + 1).toLowerCase() : "";
-    const fileName = `${userEmail}-${Date.now()}-${Math.floor(
-      Math.random() * 100
-    )
-      .toString()
-      .padStart(2, "0")}${extension ? `.${extension}` : ""}`;
+      // Get extension from uploaded file name
+      // Always derive extension from uploaded file name, fallback to empty string if not found
+      const originalName = file.name || "audio";
+      const lastDot = originalName.lastIndexOf(".");
+      const extension = lastDot !== -1 ? originalName.substring(lastDot + 1).toLowerCase() : "";
+      const fileName = `${userEmail}-${Date.now()}-${Math.floor(
+        Math.random() * 100
+      )
+        .toString()
+        .padStart(2, "0")}${extension ? `.${extension}` : ""}`;
       const filePath = `${user?.id || "anonymous"}/${fileName}`;
 
       const { data, error } = await supabase.storage
@@ -400,7 +405,8 @@ export default function NewRecording() {
 
   // Start recording
   const startRecording = async () => {
-    // Clear previous recording file and duration
+    // Clear previous recording file and duration, and remove from localStorage
+    localStorage.removeItem("emscribe_audioFileMetadata");
     setRecordingFile(null);
     setRecordingDuration(0);
     try {

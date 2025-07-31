@@ -30,12 +30,24 @@ export default function SignupPage() {
     try {
       // Use Supabase Auth for client-side authentication
       const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
+        email: email,
+        password: password,
       });
+      console.log("Sign-up data:", data);
+      if (!data.session) {
+        // Check if email exists and is confirmed
+        router.push("/login");
+        throw new Error(
+          "Account created. Check your email for confirmation link. If you don't receive it, proceed to login."
+        );
+      }
+      console.log("Sign-up data:", await response.json());
+      setLoading(false);
       router.push("/authentication");
+      return;
     } catch (err) {
-      setError(err.message);
+      alert(err.message);
+      // setError(err.message);
     } finally {
       setLoading(false);
     }

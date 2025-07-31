@@ -32,7 +32,7 @@ export default function SignupPage() {
       <div className="signup-container">
         <h2>Email Confirmation</h2>
         <div className="authentication-info">
-          <p>Please check your email for a confirmation link from Supabase to complete the registration process.</p>
+          <p style={{ marginBottom: "16px" }}>Please check your email for a confirmation link from Supabase to complete the registration process.</p>
           <button onClick={() => router.push("/login")}>
             Login
           </button>

@@ -24,10 +24,8 @@ export default async function handler(req, res) {
 
             const { data, error } = await supabase.auth.signUp({ email, password });
             if (error) return res.status(500).json({ error: error.message });
-            console.log('Sign-up data:', data);
-            if (!data.user) {
-                return res.status(400).json({ error: 'Unhandled sign-up error' });
-            }
+
+            console.log("Sign-up data:", data);
             return res.status(201).json({ token: data.session.access_token });
         }
 

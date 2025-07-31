@@ -4,7 +4,7 @@ export function getSupabaseClient(authHeader) {
   // const jwt = authHeader?.replace(/^Bearer\s+/i, '');
 
   return createClient(
-    process.env.SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
       global: {
