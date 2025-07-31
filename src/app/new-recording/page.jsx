@@ -234,9 +234,13 @@ export default function NewRecording() {
       "audio/wav",
       "audio/webm",
       "audio/ogg",
+      "video/mp4", // Add MP4 support
+      "audio/mp4", // Add MP4 audio support
+      "audio/m4a", // Add M4A support
+      "audio/x-m4a", // Add alternative M4A MIME type
     ];
     if (!validTypes.some((type) => file.type.includes(type))) {
-      return "File must be in a supported audio format (MP3, WAV, WebM, OGG)";
+      return "File must be in a supported audio format (MP3, WAV, WebM, OGG, MP4, M4A)";
     }
     if (file.size > 30 * 1024 * 1024) {
       // 30MB
@@ -315,11 +319,16 @@ export default function NewRecording() {
         return;
       }
       const userEmail = user.email;
-      const fileName = `${userEmail}-${Date.now()}-${Math.floor(
-        Math.random() * 100
-      )
-        .toString()
-        .padStart(2, "0")}.mp3`;
+    // Get extension from uploaded file name
+    // Always derive extension from uploaded file name, fallback to empty string if not found
+    const originalName = file.name || "audio";
+    const lastDot = originalName.lastIndexOf(".");
+    const extension = lastDot !== -1 ? originalName.substring(lastDot + 1).toLowerCase() : "";
+    const fileName = `${userEmail}-${Date.now()}-${Math.floor(
+      Math.random() * 100
+    )
+      .toString()
+      .padStart(2, "0")}${extension ? `.${extension}` : ""}`;
       const filePath = `${user?.id || "anonymous"}/${fileName}`;
 
       const { data, error } = await supabase.storage
@@ -461,6 +470,7 @@ export default function NewRecording() {
   };
 
   // Generate SOAP note
+  // Update the generateSoapNote function to handle recorded audio upload
   const generateSoapNote = async () => {
     // Clear localStorage and reset textareas
     Object.values(LS_KEYS).forEach((key) => localStorage.removeItem(key));
@@ -472,19 +482,6 @@ export default function NewRecording() {
     setSoapPlan("");
     setBillingSuggestion("");
 
-    // --- UPDATED IMPLEMENTATION --------------------------------------------------------
-    // Retrieve audio file metadata
-    const metadataStr = localStorage.getItem("emscribe_audioFileMetadata");
-    if (!metadataStr) {
-      alert("No audio file metadata found. Please upload a recording first.");
-      return;
-    }
-    const metadata = JSON.parse(metadataStr);
-    if (!metadata.path) {
-      alert("Audio file path missing in metadata.");
-      return;
-    }
-
     setSoapNoteRequested(true);
     setIsProcessing(true);
     setActiveSection("review");
@@ -494,7 +491,80 @@ export default function NewRecording() {
     });
 
     try {
-      const payload = { audio_file_path: metadata.path };
+      let audioFilePath = "";
+
+      // Check if we have existing uploaded file metadata
+      const metadataStr = localStorage.getItem("emscribe_audioFileMetadata");
+
+      if (metadataStr) {
+        // File was uploaded - use existing metadata
+        const metadata = JSON.parse(metadataStr);
+        if (!metadata.path) {
+          throw new Error("Audio file path missing in metadata.");
+        }
+        audioFilePath = metadata.path;
+      } else if (recordingFile) {
+        // File was recorded - need to upload it first
+        setCurrentStatus({
+          status: "info",
+          message: "Uploading recorded audio...",
+        });
+
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          throw new Error("You must be logged in to upload files.");
+        }
+
+        const userEmail = user.email;
+        // Get extension from locally recorded file name
+        // Always derive extension from locally recorded file name, fallback to empty string if not found
+        let extension = "";
+        if (recordingFile && recordingFile.name) {
+          const lastDot = recordingFile.name.lastIndexOf(".");
+          if (lastDot !== -1) extension = recordingFile.name.substring(lastDot + 1).toLowerCase();
+        }
+        const fileName = `${userEmail}-${Date.now()}-${Math.floor(
+          Math.random() * 100
+        )
+          .toString()
+          .padStart(2, "0")}${extension ? `.${extension}` : ""}`;
+        const filePath = `${user?.id || "anonymous"}/${fileName}`;
+
+        const { data, error } = await supabase.storage
+          .from("audio-files")
+          .upload(filePath, recordingFile, { upsert: false });
+
+        if (error) {
+          throw new Error(`Error uploading recorded audio: ${error.message}`);
+        }
+
+        // Save metadata for later use
+        const metadata = {
+          path: data.path,
+          id: data.id,
+          fullPath: data.fullPath,
+        };
+        console.log("Recorded file uploaded successfully:", metadata);
+        localStorage.setItem(
+          "emscribe_audioFileMetadata",
+          JSON.stringify(metadata)
+        );
+        audioFilePath = data.path;
+
+        setCurrentStatus({
+          status: "processing",
+          message: "Audio uploaded, starting transcription...",
+        });
+      } else {
+        throw new Error(
+          "No audio file found. Please upload or record audio first."
+        );
+      }
+
+      // Now proceed with the API call using audioFilePath
+      const payload = { audio_file_path: audioFilePath };
       const response = await fetch("/api/prompt-llm", {
         headers: {
           "Content-Type": "application/json",
@@ -503,6 +573,7 @@ export default function NewRecording() {
         method: "POST",
         body: JSON.stringify(payload),
       });
+
       if (!response.ok) {
         let errorMessage = `Server error: ${response.status} ${response.statusText}`;
         try {
@@ -518,6 +589,7 @@ export default function NewRecording() {
         throw new Error("No readable response body received from server");
       }
 
+      // Rest of the streaming response handling remains the same...
       const reader = response.body.getReader();
       let buffer = "";
       while (true) {
@@ -586,7 +658,7 @@ export default function NewRecording() {
                     setSoapPlan(soapPlanText);
                   }
 
-                  // Format Billing Suggestion: pass the entire object to formatMarkdownText
+                  // Format Billing Suggestion: pass the entire object to cleanMarkdownText
                   if (jsonData.data.billingSuggestion) {
                     let billingText = format.cleanMarkdownText(
                       "",
@@ -627,74 +699,6 @@ export default function NewRecording() {
       });
       setIsProcessing(false);
     }
-    return;
-
-    // // --- MOCK IMPLEMENTATION FOR TESTING ---------------------------------------------------------------
-    // // To switch back to the real API, comment out this block and uncomment the original above.
-    // if (!recordingFile) return;
-
-    // setIsProcessing(true);
-    // setActiveSection("review");
-    // setCurrentStatus({
-    //   status: "processing",
-    //   message: "Starting transcription...",
-    // });
-    // try {
-    //   if (line.startsWith("data: ")) {
-    //     const jsonString = line.substring(6);
-    //     if (jsonString.trim()) {
-    //       jsonData = JSON.parse(jsonString);
-    //         }
-    //       } else {
-    //         jsonData = JSON.parse(line);
-    //       }
-    //     } catch (e) {
-    //       // Fallback: try to fix common JSON issues (e.g., unescaped newlines)
-    //       try {
-    //         if (line.startsWith("data: ")) {
-    //           const jsonString = line.substring(6);
-    //           // Replace unescaped newlines with spaces (for mock data only)
-    //           const safeJsonString = jsonString.replace(/\n/g, " ");
-    //           jsonData = JSON.parse(safeJsonString);
-    //         } else {
-    //           const safeLine = line.replace(/\n/g, " ");
-    //           jsonData = JSON.parse(safeLine);
-    //         }
-    //       } catch (e2) {
-    //         // Still failed, skip this line
-    //         continue;
-    //       }
-    //     }
-    //     console.log("Parsed JSON data:", jsonData);
-    //     if (jsonData) {
-    //       setCurrentStatus(jsonData);
-    //       if (
-    //         jsonData.status === "transcription complete" &&
-    //         jsonData.data?.transcript
-    //       ) {
-    //         setTranscript(jsonData.data.transcript);
-    //       }
-    //       if (
-    //         jsonData.status === "soap note complete" &&
-    //         jsonData.data?.soapNote
-    //       ) {
-    //         // Format SOAP Note: pass the entire object to formatMarkdownText
-    //         let soapNoteText = format.formatMarkdownText('', jsonData.data.soapNote, 0, "1.25em");
-    //         setSoapNote(soapNoteText);
-
-    //         // Format Billing Suggestion: pass the entire object to format.formatMarkdownText
-    //         console.log("Billing suggestion data:", jsonData.data.billingSuggestion);
-    //         if (jsonData.data.billingSuggestion) {
-    //           let billingText = format.formatMarkdownText('', jsonData.data.billingSuggestion, 0, "1.25em");
-    //           setBillingSuggestion(billingText);
-    //         }
-
-    //         setIsProcessing(false);
-    //       }
-    //     }
-    //   }
-    // }
-    // --- END MOCK IMPLEMENTATION FOR TESTING ----------------------------------------------------------
   };
 
   // Save transcript and note
@@ -710,7 +714,9 @@ export default function NewRecording() {
     if (!soapPlan.trim()) missingFields.push("Plan");
     if (!billingSuggestion.trim()) missingFields.push("Billing Suggestion");
     if (missingFields.length > 0) {
-      setErrorMessage("Required field(s): " + missingFields.map((f) => `${f}`).join(", "));
+      setErrorMessage(
+        "Required field(s): " + missingFields.map((f) => `${f}`).join(", ")
+      );
       return;
     } else {
       setErrorMessage("");
@@ -869,7 +875,7 @@ export default function NewRecording() {
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
                     <input
                       type="file"
-                      accept="audio/*"
+                      accept="audio/*,video/mp4,.mp4,.m4a" // Updated to include MP4 and M4A
                       onChange={handleFileUpload}
                       className="hidden"
                       id="file-upload"
@@ -884,7 +890,7 @@ export default function NewRecording() {
                       <div className="text-sm text-gray-500 mt-2">
                         Max 30MB, 40 minutes duration
                         <br />
-                        Supports MP3, WAV, WebM, OGG
+                        Supports MP3, WAV, WebM, OGG, MP4, M4A
                       </div>
                     </label>
                   </div>
@@ -948,6 +954,16 @@ export default function NewRecording() {
                             ? "text-gray-500"
                             : "text-green-600"
                         }`}
+                        data-path={(() => {
+                          try {
+                            const metadataStr = localStorage.getItem("emscribe_audioFileMetadata");
+                            if (metadataStr) {
+                              const metadata = JSON.parse(metadataStr);
+                              return metadata.path || "";
+                            }
+                          } catch (e) {}
+                          return "";
+                        })()}
                       >
                         {recordingFile.name} (
                         {(recordingFile.size / (1024 * 1024)).toFixed(1)}MB)
