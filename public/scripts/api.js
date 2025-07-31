@@ -31,7 +31,7 @@ export const getAllTranscripts = async () => {
 export const getAllSoapNotes = async () => {
   const jwt = getJWT();
   try {
-    const res = await fetch(`${API_BASE}/api/soap-notes`, {
+    const res = await fetch(`${API_BASE}/api/soap-notes/batch`, {
       headers: { 'Authorization': `Bearer ${jwt}` }
     });
     

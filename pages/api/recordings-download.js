@@ -1,4 +1,4 @@
-import supabase from '@/src/utils/supabase';
+import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { recordingSchema } from '@/src/app/schemas';
 import { filterUserIdFromReqBody } from '@/src/utils/filterUserIdFromReqBody';
@@ -8,6 +8,8 @@ const recordingTableName = 'recordings';
 
 export default async function handler(req, res) {
     // Authenticate user for all methods
+    const supabase = getSupabaseClient(req.headers.authorization);
+
     const { user, error: authError } = await authenticateRequest(req);
     if (authError) return res.status(401).json({ error: authError });
 

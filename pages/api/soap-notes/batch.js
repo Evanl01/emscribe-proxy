@@ -1,4 +1,4 @@
-import supabase from '@/src/utils/supabase';
+import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { soapNoteSchema } from '@/src/app/schemas';
 import { filterUserIdFromReqBody } from '@/src/utils/filterUserIdFromReqBody';
@@ -8,7 +8,7 @@ import { filterForbiddenFields } from '@/src/utils/filterForbiddenFields';
 const soapNoteTableName = 'soapNotes';
 
 export default async function handler(req, res) {
-
+  const supabase = getSupabaseClient(req.headers.authorization);
   // Authenticate user for all methods
   const { user, error: authError } = await authenticateRequest(req);
   if (authError) return res.status(401).json({ error: authError });

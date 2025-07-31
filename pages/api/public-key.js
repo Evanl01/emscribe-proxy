@@ -1,7 +1,10 @@
 import fs from 'fs';
 import path from 'path';
+import { getSupabaseClient } from '@/src/utils/supabase';
 
 export default function handler(req, res) {
+  const supabase = getSupabaseClient(req.headers.authorization);
+
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

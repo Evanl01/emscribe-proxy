@@ -1,8 +1,9 @@
-import supabase from '@/src/utils/supabase';
-import { verifyToken } from '@/src/utils/verifyToken';
+import { getSupabaseClient } from '@/src/utils/supabase';
+import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { getUserIdByEmail } from '@/src/utils/getUserIdByEmail';
 
 export default async function handler(req, res) {
+    const supabase = getSupabaseClient(req.headers.authorization);
     if (req.method === 'POST') {
         const { action, email, password, emailRedirectTo } = req.body;
 
@@ -19,12 +20,8 @@ export default async function handler(req, res) {
         }
 
         if (action === 'sign-up') {
-        // JWT validity check endpoint
-            const userId = await getUserIdByEmail(email);
-            if (!userId || userId === null) {
-                return res.status(400).json({ error: 'Email already exists.' });
-            }
-            
+            // JWT validity check endpoint
+
             const { data, error } = await supabase.auth.signUp({ email, password });
             if (error) return res.status(500).json({ error: error.message });
             console.log('Sign-up data:', data);
@@ -35,11 +32,7 @@ export default async function handler(req, res) {
         }
 
         if (action === 'check-validity') {
-            const authHeader = req.headers.authorization || '';
-            const token = authHeader.replace('Bearer ', '');
-            if (!token) return res.status(400).json({ error: 'Token is required for check' });
-
-            const { user, error: verifyError } = await verifyToken(token);
+            const { user, error: verifyError } = await authenticateRequest(req);
             if (verifyError) return res.status(401).json({ error: verifyError });
             // Optionally return user info or just success
             return res.status(200).json({ valid: true, user });
@@ -52,11 +45,7 @@ export default async function handler(req, res) {
         }
 
         if (action === 'sign-out') {
-            const authHeader = req.headers.authorization || '';
-            const token = authHeader.replace('Bearer ', '');
-            if (!token) return res.status(400).json({ error: 'Token is required for sign-out' });
-
-            const { user, error: verifyError } = await verifyToken(token);
+            const { user, error: verifyError } = await authenticateRequest(req);
             if (verifyError) return res.status(401).json({ error: verifyError });
             const { error } = await supabase.auth.signOut();
             if (error) return res.status(500).json({ error: error.message });

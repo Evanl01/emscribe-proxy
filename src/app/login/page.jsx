@@ -5,6 +5,12 @@ import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
 import * as validation from "@/public/scripts/validation.js";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -22,22 +28,22 @@ export default function LoginPage() {
     }
     setLoading(true);
     try {
-      const response = await fetch("/api/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "sign-in", email, password }),
+      // Use Supabase Auth for client-side authentication
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Login failed");
-      }
-      // Save JWT to localStorage for website access (best practice: only store JWT, not userEmail)
-      window.localStorage.setItem("jwt", data.token);
+      if (error) throw new Error(error.message);
+      // Save JWT to localStorage for backend API and extension
+      const jwt = data.session?.access_token;
+      if (!jwt) throw new Error("No access token returned from Supabase.");
+      window.localStorage.setItem("jwt", jwt);
+      window.localStorage.setItem("userEmail", email);
       // Notify extension content script (if present) via window.postMessage
       window.postMessage(
         {
           type: "EMSCRIBE_LOGIN",
-          jwt: data.token,
+          jwt,
           userEmail: email,
         },
         "*"

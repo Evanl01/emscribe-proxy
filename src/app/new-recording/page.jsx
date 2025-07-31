@@ -1,13 +1,18 @@
 "use client";
 import { useRouter } from "next/navigation";
 import React, { useState, useRef, useEffect } from "react";
-import * as api from '@/public/scripts/api.js';
-import * as ui from '@/public/scripts/ui.js';
-import * as format from '@/public/scripts/format.js';
-import * as validation from '@/public/scripts/validation.js';
+import * as api from "@/public/scripts/api.js";
+import * as ui from "@/public/scripts/ui.js";
+import * as format from "@/public/scripts/format.js";
+import * as validation from "@/public/scripts/validation.js";
+import { createClient } from "@supabase/supabase-js";
 // import * as auth  from "@/src/utils/Auth.jsx";
 import Auth from "@/src/utils/Auth.jsx";
 
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
 export default function NewRecording() {
   const router = useRouter();
@@ -31,7 +36,7 @@ export default function NewRecording() {
   const handleEditableChange = (setter) => (e) => {
     setter(e.target.innerHTML);
   };
-  // ...existing code...
+
   // LocalStorage keys
   const LS_KEYS = {
     patientEncounterName: "emscribe_patientEncounterName",
@@ -297,12 +302,56 @@ export default function NewRecording() {
         alert("Recording duration must be less than 40 minutes");
         return;
       }
+
+      // Show uploading status
+      setCurrentStatus({ status: "info", message: "Uploading recording..." });
+      setIsSaving(true);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        alert("You must be logged in to upload files.");
+        router.push("/login");
+        return;
+      }
+      const userEmail = user.email;
+      const fileName = `${userEmail}-${Date.now()}-${Math.floor(
+        Math.random() * 100
+      )
+        .toString()
+        .padStart(2, "0")}.mp3`;
+      const filePath = `${user?.id || "anonymous"}/${fileName}`;
+
+      const { data, error } = await supabase.storage
+        .from("audio-files")
+        .upload(filePath, file, { upsert: false });
+      setIsSaving(false);
+      if (error) {
+        setCurrentStatus({ status: "error", message: error.message });
+        alert("Error uploading to Supabase: " + error.message);
+        return;
+      }
+      // Save metadata for later use
+      const metadata = {
+        path: data.path,
+        id: data.id,
+        fullPath: data.fullPath,
+      };
+      console.log("File uploaded successfully:", metadata);
+      localStorage.setItem(
+        "emscribe_audioFileMetadata",
+        JSON.stringify(metadata)
+      );
       setRecordingFile(file);
       setRecordingDuration(duration);
+      // Show 'Recording Ready' after upload completes
+      setCurrentStatus({ status: "success", message: "Recording Ready" });
     } catch (error) {
-      console.error("Error processing audio file:", error);
+      setIsSaving(false);
+      setCurrentStatus({ status: "error", message: error.message });
+      console.error("Error processing or uploading audio file:", error);
       alert(
-        "Error processing audio file. Please ensure it's a valid audio file."
+        "Error processing or uploading audio file. Please ensure it's a valid audio file."
       );
     }
   };
@@ -413,8 +462,28 @@ export default function NewRecording() {
 
   // Generate SOAP note
   const generateSoapNote = async () => {
-    // --- ORIGINAL IMPLEMENTATION (API CALL) --------------------------------------------------------
-    if (!recordingFile) return;
+    // Clear localStorage and reset textareas
+    Object.values(LS_KEYS).forEach((key) => localStorage.removeItem(key));
+    setPatientEncounterName("");
+    setTranscript("");
+    setSoapSubjective("");
+    setSoapObjective("");
+    setSoapAssessment("");
+    setSoapPlan("");
+    setBillingSuggestion("");
+
+    // --- UPDATED IMPLEMENTATION --------------------------------------------------------
+    // Retrieve audio file metadata
+    const metadataStr = localStorage.getItem("emscribe_audioFileMetadata");
+    if (!metadataStr) {
+      alert("No audio file metadata found. Please upload a recording first.");
+      return;
+    }
+    const metadata = JSON.parse(metadataStr);
+    if (!metadata.path) {
+      alert("Audio file path missing in metadata.");
+      return;
+    }
 
     setSoapNoteRequested(true);
     setIsProcessing(true);
@@ -425,13 +494,14 @@ export default function NewRecording() {
     });
 
     try {
-      const formData = new FormData();
-      formData.append("audio_file", recordingFile);
-
+      const payload = { audio_file_path: metadata.path };
       const response = await fetch("/api/prompt-llm", {
-        headers: { Authorization: `Bearer ${api.getJWT()}` },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${api.getJWT()}`,
+        },
         method: "POST",
-        body: formData,
+        body: JSON.stringify(payload),
       });
       if (!response.ok) {
         let errorMessage = `Server error: ${response.status} ${response.statusText}`;
@@ -484,7 +554,6 @@ export default function NewRecording() {
                 ) {
                   // Set S/O/A/P fields individually
                   if (jsonData.data.soapNote) {
-                    
                     const note = jsonData.data.soapNote;
                     console.log("SOAP Note data:", note);
                     let soapSubjectiveText = format.cleanMarkdownText(
@@ -632,7 +701,8 @@ export default function NewRecording() {
   const saveTranscriptAndNote = async () => {
     setSaveAttempted(true);
     const missingFields = [];
-    if (!patientEncounterName.trim()) missingFields.push("Patient Encounter Name");
+    if (!patientEncounterName.trim())
+      missingFields.push("Patient Encounter Name");
     if (!transcript.trim()) missingFields.push("Transcript");
     if (!soapSubjective.trim()) missingFields.push("Subjective");
     if (!soapObjective.trim()) missingFields.push("Objective");
@@ -640,7 +710,7 @@ export default function NewRecording() {
     if (!soapPlan.trim()) missingFields.push("Plan");
     if (!billingSuggestion.trim()) missingFields.push("Billing Suggestion");
     if (missingFields.length > 0) {
-      setErrorMessage(missingFields.map((f) => `${f} required`).join(", "));
+      setErrorMessage("Required field(s): " + missingFields.map((f) => `${f}`).join(", "));
       return;
     } else {
       setErrorMessage("");
@@ -685,7 +755,20 @@ export default function NewRecording() {
 
       const formData = new FormData();
       formData.append("name", patientEncounterName);
-      formData.append("recording", recordingFile);
+      // Get audio_file_path from localStorage metadata
+      const audioFileMetadata = localStorage.getItem(
+        "emscribe_audioFileMetadata"
+      );
+      let audio_file_path = "";
+      if (audioFileMetadata) {
+        try {
+          const metadataObj = JSON.parse(audioFileMetadata);
+          audio_file_path = metadataObj.path || "";
+        } catch (e) {
+          audio_file_path = "";
+        }
+      }
+      formData.append("audio_file_path", audio_file_path);
       formData.append("transcript_text", transcript);
       //merge SOAP note and billing suggestion into soapNote_text jsonObject
       let soapNoteText = JSON.stringify({
@@ -727,7 +810,16 @@ export default function NewRecording() {
       // Clear localStorage for these fields after successful save
       Object.values(LS_KEYS).forEach((key) => localStorage.removeItem(key));
       // Navigate back to dashboard
-      router.push("/new-recording");
+      setPatientEncounterName("");
+      setTranscript("");
+      setSoapSubjective("");
+      setSoapObjective("");
+      setSoapAssessment("");
+      setSoapPlan("");
+      setBillingSuggestion("");
+      setIsSaving(false);
+      //reload page
+      window.location.reload();
     } catch (error) {
       let debugMsg = "Error saving data: " + error.message;
       if (error.stack) {
@@ -750,389 +842,381 @@ export default function NewRecording() {
     <>
       <Auth />
       <div className="max-w-4xl mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-8">New Recording</h1>
+        <h1 className="text-3xl font-bold mb-8">New Recording</h1>
 
-      {/* Section 1: Upload/Record */}
-      <div className="border border-gray-200 rounded-lg mb-4">
-        <button
-          className="w-full p-4 text-left bg-gray-50 hover:bg-gray-100 flex justify-between items-center"
-          onClick={() =>
-            setActiveSection(activeSection === "upload" ? "upload" : "upload")
-          }
-        >
-          <span className="text-lg font-semibold">
-            1. Upload or Record Audio
-          </span>
-          <span className="text-xl">
-            {activeSection === "upload" ? "−" : "+"}
-          </span>
-        </button>
+        {/* Section 1: Upload/Record */}
+        <div className="border border-gray-200 rounded-lg mb-4">
+          <button
+            className="w-full p-4 text-left bg-gray-50 hover:bg-gray-100 flex justify-between items-center"
+            onClick={() =>
+              setActiveSection(activeSection === "upload" ? "upload" : "upload")
+            }
+          >
+            <span className="text-lg font-semibold">
+              1. Upload or Record Audio
+            </span>
+            <span className="text-xl">
+              {activeSection === "upload" ? "−" : "+"}
+            </span>
+          </button>
 
-        {activeSection === "upload" && (
-          <div className="p-6 border-t border-gray-200">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Upload Section */}
-              <div className="space-y-4">
-                <h3 className="text-lg font-medium">Upload Recording</h3>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                  <input
-                    type="file"
-                    accept="audio/*"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                    id="file-upload"
-                    disabled={isRecording || isProcessing}
-                  />
-                  <label
-                    htmlFor="file-upload"
-                    className="cursor-pointer text-blue-600 hover:text-blue-800"
-                  >
-                    <div className="text-4xl mb-2">📁</div>
-                    <div>Click to upload audio file</div>
-                    <div className="text-sm text-gray-500 mt-2">
-                      Max 30MB, 40 minutes duration
-                      <br />
-                      Supports MP3, WAV, WebM, OGG
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {/* Recording Section */}
-              <div className="space-y-4">
-                <h3 className="text-lg font-medium">Record Audio</h3>
-                <div className="text-center space-y-4">
-                  <div className="text-2xl">{isRecording ? "🔴" : "🎤"}</div>
-
-                  {isRecording && (
-                    <div className="text-lg font-mono">
-                      {formatDuration(recordingDuration)} / 40:00
-                    </div>
-                  )}
-
-                  <button
-                    onClick={isRecording ? stopRecording : startRecording}
-                    disabled={isProcessing}
-                    className={`px-6 py-3 rounded-lg font-medium ${
-                      isRecording
-                        ? "bg-red-600 hover:bg-red-700 text-white"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
-                    } disabled:opacity-50`}
-                  >
-                    {isRecording ? "Stop Recording" : "Start Recording"}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {recordingFile && !isRecording && (
-              <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-                <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                  <div className="flex-1">
-                    <p className="font-medium text-green-800">
-                      Recording Ready
-                    </p>
-                    <p className="text-sm text-green-600">
-                      {recordingFile.name} (
-                      {(recordingFile.size / (1024 * 1024)).toFixed(1)}MB)
-                      {recordingDuration > 0 &&
-                        ` - ${formatDuration(recordingDuration)}`}
-                    </p>
-
-                    {/* Audio Player Controls */}
-                    <div className="mt-4 flex items-center gap-2 flex-wrap">
-                      <audio
-                        ref={audioPlayerRef}
-                        src={audioUrl || undefined}
-                        onLoadStart={handleAudioLoadStart}
-                        onLoadedMetadata={handleAudioLoadedMetadata}
-                        onTimeUpdate={handleAudioTimeUpdate}
-                        onEnded={handleAudioEnded}
-                        onError={handleAudioError}
-                        preload="metadata"
-                        style={{ display: "none" }}
-                      />
-
-                      <button
-                        type="button"
-                        onClick={playAudio}
-                        disabled={
-                          audioPlaying || audioLoadingState !== "loaded"
-                        }
-                        className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        ▶️ Play
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={pauseAudio}
-                        disabled={!audioPlaying}
-                        className="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        ⏸️ Pause
-                      </button>
-
-                      <input
-                        type="range"
-                        min={0}
-                        max={
-                          isFinite(audioDuration) && audioDuration > 0
-                            ? audioDuration
-                            : recordingDuration || 100
-                        }
-                        step={0.1}
-                        value={audioCurrentTime}
-                        onChange={(e) => seekAudio(parseFloat(e.target.value))}
-                        className="w-32 md:w-48"
-                        disabled={audioLoadingState !== "loaded"}
-                      />
-
-                      <span className="text-xs text-gray-700 font-mono min-w-[80px] text-right">
-                        {formatDuration(audioCurrentTime)} /{" "}
-                        {formatDuration(
-                          isFinite(audioDuration)
-                            ? audioDuration
-                            : recordingDuration || 0
-                        )}
-                      </span>
-
-                      {/* Status indicator */}
-                      <span className="text-xs">
-                        {audioLoadingState === "loading" && (
-                          <span className="text-orange-600">🔄 Loading...</span>
-                        )}
-                        {audioLoadingState === "loaded" && (
-                          <span className="text-green-600">✅ Ready</span>
-                        )}
-                        {audioLoadingState === "error" && (
-                          <span className="text-red-600">❌ Error</span>
-                        )}
-                      </span>
-                    </div>
+          {activeSection === "upload" && (
+            <div className="p-6 border-t border-gray-200">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Upload Section */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium">Upload Recording</h3>
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      id="file-upload"
+                      disabled={isRecording || isProcessing}
+                    />
+                    <label
+                      htmlFor="file-upload"
+                      className="cursor-pointer text-blue-600 hover:text-blue-800"
+                    >
+                      <div className="text-4xl mb-2">📁</div>
+                      <div>Click to upload audio file</div>
+                      <div className="text-sm text-gray-500 mt-2">
+                        Max 30MB, 40 minutes duration
+                        <br />
+                        Supports MP3, WAV, WebM, OGG
+                      </div>
+                    </label>
                   </div>
+                </div>
 
-                  <button
-                    onClick={generateSoapNote}
-                    disabled={isProcessing}
-                    className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-medium disabled:opacity-50"
-                  >
-                    {isProcessing ? "Processing..." : "Generate SOAP Note"}
-                  </button>
+                {/* Recording Section */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium">Record Audio</h3>
+                  <div className="text-center space-y-4">
+                    <div className="text-2xl">{isRecording ? "🔴" : "🎤"}</div>
+
+                    {isRecording && (
+                      <div className="text-lg font-mono">
+                        {formatDuration(recordingDuration)} / 40:00
+                      </div>
+                    )}
+
+                    <button
+                      onClick={isRecording ? stopRecording : startRecording}
+                      disabled={isProcessing}
+                      className={`px-6 py-3 rounded-lg font-medium ${
+                        isRecording
+                          ? "bg-red-600 hover:bg-red-700 text-white"
+                          : "bg-blue-600 hover:bg-blue-700 text-white"
+                      } disabled:opacity-50`}
+                    >
+                      {isRecording ? "Stop Recording" : "Start Recording"}
+                    </button>
+                  </div>
                 </div>
               </div>
-            )}
-          </div>
-        )}
-      </div>
 
-      {/* Section 2: Review */}
-      <div
-        className={`border border-gray-200 rounded-lg ${
-          !soapNoteRequested ? "opacity-60 pointer-events-none select-none" : ""
-        }`}
-      >
-        <button
-          className="w-full p-4 text-left bg-gray-50 hover:bg-gray-100 flex justify-between items-center"
-          onClick={() =>
-            setActiveSection(activeSection === "review" ? "review" : "review")
-          }
-          disabled={!soapNoteRequested}
+              {recordingFile && !isRecording && (
+                <div
+                  className={`mt-6 p-4 rounded-lg border ${
+                    currentStatus?.status === "info" &&
+                    currentStatus?.message === "Uploading recording..."
+                      ? "bg-gray-100 border-gray-300 opacity-60 pointer-events-none select-none"
+                      : "bg-green-50 border-green-200"
+                  }`}
+                >
+                  <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                    <div className="flex-1">
+                      <p
+                        className={`font-medium ${
+                          currentStatus?.status === "info" &&
+                          currentStatus?.message === "Uploading recording..."
+                            ? "text-gray-500"
+                            : "text-green-800"
+                        }`}
+                      >
+                        {currentStatus?.status === "info" &&
+                        currentStatus?.message === "Uploading recording..."
+                          ? "Uploading recording..."
+                          : "Recording Ready"}
+                      </p>
+                      <p
+                        className={`text-sm ${
+                          currentStatus?.status === "info" &&
+                          currentStatus?.message === "Uploading recording..."
+                            ? "text-gray-500"
+                            : "text-green-600"
+                        }`}
+                      >
+                        {recordingFile.name} (
+                        {(recordingFile.size / (1024 * 1024)).toFixed(1)}MB)
+                        {recordingDuration > 0 &&
+                          ` - ${formatDuration(recordingDuration)}`}
+                      </p>
+
+                      {/* Audio Player Controls - Hidden during upload */}
+                      {!(
+                        currentStatus?.status === "info" &&
+                        currentStatus?.message === "Uploading recording..."
+                      ) && (
+                        <div className="mt-4 flex items-center gap-2 flex-wrap">
+                          <audio
+                            ref={audioPlayerRef}
+                            src={audioUrl || undefined}
+                            onLoadStart={handleAudioLoadStart}
+                            onLoadedMetadata={handleAudioLoadedMetadata}
+                            onTimeUpdate={handleAudioTimeUpdate}
+                            onEnded={handleAudioEnded}
+                            onError={handleAudioError}
+                            preload="metadata"
+                            style={{ display: "none" }}
+                          />
+
+                          <button
+                            type="button"
+                            onClick={playAudio}
+                            disabled={
+                              audioPlaying || audioLoadingState !== "loaded"
+                            }
+                            className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            ▶️ Play
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={pauseAudio}
+                            disabled={!audioPlaying}
+                            className="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            ⏸️ Pause
+                          </button>
+
+                          <input
+                            type="range"
+                            min={0}
+                            max={
+                              isFinite(audioDuration) && audioDuration > 0
+                                ? audioDuration
+                                : recordingDuration || 100
+                            }
+                            step={0.1}
+                            value={audioCurrentTime}
+                            onChange={(e) =>
+                              seekAudio(parseFloat(e.target.value))
+                            }
+                            className="w-32 md:w-48"
+                            disabled={audioLoadingState !== "loaded"}
+                          />
+
+                          <span className="text-xs text-gray-700 font-mono min-w-[80px] text-right">
+                            {formatDuration(audioCurrentTime)} /{" "}
+                            {formatDuration(
+                              isFinite(audioDuration)
+                                ? audioDuration
+                                : recordingDuration || 0
+                            )}
+                          </span>
+
+                          {/* Status indicator */}
+                          <span className="text-xs">
+                            {audioLoadingState === "loading" && (
+                              <span className="text-orange-600">
+                                🔄 Loading...
+                              </span>
+                            )}
+                            {audioLoadingState === "loaded" && (
+                              <span className="text-green-600">✅ Ready</span>
+                            )}
+                            {audioLoadingState === "error" && (
+                              <span className="text-red-600">❌ Error</span>
+                            )}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={generateSoapNote}
+                      disabled={
+                        isProcessing ||
+                        (currentStatus?.status === "info" &&
+                          currentStatus?.message === "Uploading recording...")
+                      }
+                      className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-medium disabled:opacity-50"
+                    >
+                      {isProcessing ? "Processing..." : "Generate SOAP Note"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Section 2: Review */}
+        <div
+          className={`border border-gray-200 rounded-lg ${
+            !soapNoteRequested
+              ? "opacity-60 pointer-events-none select-none"
+              : ""
+          }`}
         >
-          <span className="text-lg font-semibold">
-            2. Review Transcript and Generated Note
-          </span>
-          <span className="text-xl">
-            {activeSection === "review" ? "−" : "+"}
-          </span>
-        </button>
+          <button
+            className="w-full p-4 text-left bg-gray-50 hover:bg-gray-100 flex justify-between items-center"
+            onClick={() =>
+              setActiveSection(activeSection === "review" ? "review" : "review")
+            }
+            disabled={!soapNoteRequested}
+          >
+            <span className="text-lg font-semibold">
+              2. Review Transcript and Generated Note
+            </span>
+            <span className="text-xl">
+              {activeSection === "review" ? "−" : "+"}
+            </span>
+          </button>
 
-        {activeSection === "review" && (
-          <div className="p-6 border-t border-gray-200">
-            {/* Patient Encounter Name */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Patient Encounter Name
-              </label>
-              <input
-                type="text"
-                value={patientEncounterName}
-                onChange={(e) => setPatientEncounterName(e.target.value)}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                  saveAttempted && !patientEncounterName.trim()
-                    ? "border-red-500"
-                    : "border-gray-300"
-                }`}
-                placeholder="Enter patient encounter name"
-                disabled={isSaving}
-              />
-              {saveAttempted && !patientEncounterName.trim() && (
-                <div className="text-red-600 text-xs mt-1">Required</div>
-              )}
-            </div>
-
-            {/* Status Messages */}
-            {currentStatus && (
-              <div
-                className={`mb-6 p-4 rounded-lg ${
-                  currentStatus.status === "error"
-                    ? "bg-red-50 border border-red-200 text-red-800"
-                    : "bg-blue-50 border border-blue-200 text-blue-800"
-                }`}
-              >
-                <div className="font-medium capitalize">
-                  {currentStatus.status}
-                </div>
-                <div className="text-sm">{currentStatus.message}</div>
+          {activeSection === "review" && (
+            <div className="p-6 border-t border-gray-200">
+              {/* Patient Encounter Name */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Patient Encounter Name
+                </label>
+                <input
+                  type="text"
+                  value={patientEncounterName}
+                  onChange={(e) => setPatientEncounterName(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 bg-white"
+                  placeholder="Enter patient encounter name"
+                  disabled={isSaving}
+                />
               </div>
-            )}
 
-            {/* Transcript (Rich Text) */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Transcript
-              </label>
-              <textarea
-                value={transcript}
-                onChange={(e) => setTranscript(e.target.value)}
-                disabled={isSaving}
-                className={`w-full h-100 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
-                  saveAttempted && !transcript.trim()
-                    ? "border-red-500"
-                    : "border-gray-300"
-                }`}
-                style={{ minHeight: "20rem" }}
-                placeholder="Transcript will appear here..."
-              />
-              {saveAttempted && !transcript.trim() && (
-                <div className="text-red-600 text-xs mt-1">Required</div>
-              )}
-            </div>
-
-            {/* SOAP Note (S/O/A/P) */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Subjective
-              </label>
-              <textarea
-                value={soapSubjective}
-                onChange={(e) => setSoapSubjective(e.target.value)}
-                disabled={isSaving}
-                className={`w-full h-80 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
-                  saveAttempted && !soapSubjective.trim()
-                    ? "border-red-500"
-                    : "border-gray-300"
-                }`}
-                style={{ minHeight: "8rem" }}
-                placeholder="Subjective notes will appear here..."
-              />
-              {saveAttempted && !soapSubjective.trim() && (
-                <div className="text-red-600 text-xs mt-1">Required</div>
-              )}
-            </div>
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Objective
-              </label>
-              <textarea
-                value={soapObjective}
-                onChange={(e) => setSoapObjective(e.target.value)}
-                disabled={isSaving}
-                className={`w-full h-80 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
-                  saveAttempted && !soapObjective.trim()
-                    ? "border-red-500"
-                    : "border-gray-300"
-                }`}
-                style={{ minHeight: "8rem" }}
-                placeholder="Objective notes will appear here..."
-              />
-              {saveAttempted && !soapObjective.trim() && (
-                <div className="text-red-600 text-xs mt-1">Required</div>
-              )}
-            </div>
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Assessment
-              </label>
-              <textarea
-                value={soapAssessment}
-                onChange={(e) => setSoapAssessment(e.target.value)}
-                disabled={isSaving}
-                className={`w-full h-50 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
-                  saveAttempted && !soapAssessment.trim()
-                    ? "border-red-500"
-                    : "border-gray-300"
-                }`}
-                style={{ minHeight: "8rem" }}
-                placeholder="Assessment notes will appear here..."
-              />
-              {saveAttempted && !soapAssessment.trim() && (
-                <div className="text-red-600 text-xs mt-1">Required</div>
-              )}
-            </div>
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Plan
-              </label>
-              <textarea
-                value={soapPlan}
-                onChange={(e) => setSoapPlan(e.target.value)}
-                disabled={isSaving}
-                className={`w-full h-50 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
-                  saveAttempted && !soapPlan.trim()
-                    ? "border-red-500"
-                    : "border-gray-300"
-                }`}
-                style={{ minHeight: "8rem" }}
-                placeholder="Plan notes will appear here..."
-              />
-              {saveAttempted && !soapPlan.trim() && (
-                <div className="text-red-600 text-xs mt-1">Required</div>
-              )}
-            </div>
-
-            {/* Billing Suggestion (Rich Text) */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Billing Suggestion
-              </label>
-              <textarea
-                value={billingSuggestion}
-                onChange={(e) => setBillingSuggestion(e.target.value)}
-                disabled={isSaving}
-                className={`w-full h-80 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white resize-none ${
-                  saveAttempted && !billingSuggestion.trim()
-                    ? "border-red-500"
-                    : "border-gray-300"
-                }`}
-                style={{ minHeight: "20rem" }}
-                placeholder="Billing suggestion will appear here..."
-              />
-              {saveAttempted && !billingSuggestion.trim() && (
-                <div className="text-red-600 text-xs mt-1">Required</div>
-              )}
-            </div>
-
-            {/* Save Button (always enabled, but checks required fields before saving) */}
-            <div className="flex flex-col items-end">
-              <button
-                onClick={saveTranscriptAndNote}
-                disabled={isSaving}
-                className={`bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-medium ${
-                  isSaving ? "opacity-50 cursor-not-allowed" : ""
-                }`}
-              >
-                {isSaving ? "Saving..." : "Save Transcript and Generated Note"}
-              </button>
-              {errorMessage && (
-                <div className="mt-3 text-red-600 text-sm text-right w-full">
-                  {errorMessage}
+              {/* Status Messages */}
+              {currentStatus && (
+                <div
+                  className={`mb-6 p-4 rounded-lg ${
+                    currentStatus.status === "error"
+                      ? "bg-red-50 border border-red-200 text-red-800"
+                      : "bg-blue-50 border border-blue-200 text-blue-800"
+                  }`}
+                >
+                  <div className="font-medium capitalize">
+                    {currentStatus.status}
+                  </div>
+                  <div className="text-sm">{currentStatus.message}</div>
                 </div>
               )}
+
+              {/* Transcript (Rich Text) */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Transcript
+                </label>
+                <textarea
+                  value={transcript}
+                  onChange={(e) => setTranscript(e.target.value)}
+                  disabled={isSaving || isProcessing}
+                  className="w-full h-100 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 bg-white resize-none"
+                  style={{ minHeight: "20rem" }}
+                  placeholder="Transcript will appear here..."
+                />
+              </div>
+
+              {/* SOAP Note (S/O/A/P) */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Subjective
+                </label>
+                <textarea
+                  value={soapSubjective}
+                  onChange={(e) => setSoapSubjective(e.target.value)}
+                  disabled={isSaving || isProcessing}
+                  className="w-full h-80 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 bg-white resize-none"
+                  style={{ minHeight: "8rem" }}
+                  placeholder="Subjective notes will appear here..."
+                />
+              </div>
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Objective
+                </label>
+                <textarea
+                  value={soapObjective}
+                  onChange={(e) => setSoapObjective(e.target.value)}
+                  disabled={isSaving || isProcessing}
+                  className="w-full h-80 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 bg-white resize-none"
+                  style={{ minHeight: "8rem" }}
+                  placeholder="Objective notes will appear here..."
+                />
+              </div>
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Assessment
+                </label>
+                <textarea
+                  value={soapAssessment}
+                  onChange={(e) => setSoapAssessment(e.target.value)}
+                  disabled={isSaving || isProcessing}
+                  className="w-full h-50 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 bg-white resize-none"
+                  style={{ minHeight: "8rem" }}
+                  placeholder="Assessment notes will appear here..."
+                />
+              </div>
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Plan
+                </label>
+                <textarea
+                  value={soapPlan}
+                  onChange={(e) => setSoapPlan(e.target.value)}
+                  disabled={isSaving || isProcessing}
+                  className="w-full h-50 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 bg-white resize-none"
+                  style={{ minHeight: "8rem" }}
+                  placeholder="Plan notes will appear here..."
+                />
+              </div>
+
+              {/* Billing Suggestion (Rich Text) */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Billing Suggestion
+                </label>
+                <textarea
+                  value={billingSuggestion}
+                  onChange={(e) => setBillingSuggestion(e.target.value)}
+                  disabled={isSaving || isProcessing}
+                  className="w-full h-80 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 bg-white resize-none"
+                  style={{ minHeight: "20rem" }}
+                  placeholder="Billing suggestion will appear here..."
+                />
+              </div>
+
+              {/* Save Button (always enabled, but checks required fields before saving) */}
+              <div className="flex flex-col items-end">
+                <button
+                  onClick={saveTranscriptAndNote}
+                  disabled={isSaving}
+                  className={`bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-medium ${
+                    isSaving ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+                >
+                  {isSaving
+                    ? "Saving..."
+                    : "Save Transcript and Generated Note"}
+                </button>
+                {errorMessage && (
+                  <div className="mt-3 text-red-600 text-sm text-right w-full">
+                    {errorMessage}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
       </div>
     </>
   );

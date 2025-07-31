@@ -1,6 +1,6 @@
 // Backend: /api/process-recording.js
 
-import supabase from '@/src/utils/supabase';
+import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { recordingSchema } from '@/src/app/schemas';
 import formidable from 'formidable';
@@ -25,9 +25,9 @@ export const config = {
 
 export default async function handler(req, res) {
     // Authenticate user for all methods
+    const supabase = getSupabaseClient(req.headers.authorization);
     const { user, error: authError } = await authenticateRequest(req);
     if (authError) return res.status(401).json({ error: authError });
-
 
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
@@ -49,81 +49,53 @@ export default async function handler(req, res) {
         response.message = 'Processing started...';
         res.write(`data: ${JSON.stringify(response)}\n\n`);
 
-        // Parse multipart form data
-        const form = formidable({
-            maxFileSize: 30 * 1024 * 1024, // 30MB limit
-            keepExtensions: true,
-            filter: ({ mimetype }) => mimetype && mimetype.includes('audio'),
-        });
+        // Expect JSON body with audio_file_path
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        await new Promise(resolve => req.on('end', resolve));
+        let audioFilePath;
+        try {
+            const parsed = JSON.parse(body);
+            audioFilePath = parsed.audio_file_path;
+        } catch (e) {
+            response.status = 'error';
+            response.message = 'Invalid JSON body or missing audio_file_path';
+            res.write(`data: ${JSON.stringify(response)}\n\n`);
+            res.end();
+            return;
+        }
+        if (!audioFilePath) {
+            response.status = 'error';
+            response.message = 'audio_file_path is required';
+            res.write(`data: ${JSON.stringify(response)}\n\n`);
+            res.end();
+            return;
+        }
 
-        response.status = 'parsing';
-        response.message = 'Parsing uploaded file...';
+        response.status = 'downloading';
+        response.message = 'Downloading audio file from Supabase Storage...';
         res.write(`data: ${JSON.stringify(response)}\n\n`);
 
-        const [fields, files] = await form.parse(req);
-        let audioFile = files.audio_file;
-        if (Array.isArray(audioFile)) {
-            if (audioFile.length == 1) {
-                audioFile = audioFile[0]; // If only one file, use it directly
-            }
-            else {
-                response.status = 'error';
-                response.message = 'Only one audio file upload allowed per request.';
-                res.write(`data: ${JSON.stringify(response)}\n\n`);
-                res.end();
-                return;
-            }
-        }
-        // console.log('audioFile:', audioFile);
-
-        // Parse fields to extract metadata. Only expect 'name' field, filter all others and if present send error
-        // const allowedFields = ['name'];
-        // const metadata = {};
-        // for (const key of Object.keys(fields)) {
-        //     if (allowedFields.includes(key)) {
-        //         metadata[key] = fields[key];
-        //     } else {
-        //         response.status = 'error';
-        //         response.message = `Unexpected field: ${key}`;
-        //         res.write(`data: ${JSON.stringify(response)}\n\n`);
-        //         res.end();
-        //         return;
-        //     }
-        // }
-
-
-        if (!audioFile) {
+        // Download file from Supabase Storage
+        const { data: downloadData, error: downloadError } = await supabase.storage
+            .from('audio-files')
+            .download(audioFilePath);
+        if (downloadError || !downloadData) {
             response.status = 'error';
-            response.message = 'No audio file provided';
+            response.message = `Failed to download audio file: ${downloadError?.message || 'Unknown error'}`;
             res.write(`data: ${JSON.stringify(response)}\n\n`);
             res.end();
             return;
         }
-
-        // Validate file type
-        if (!audioFile.mimetype || !audioFile.mimetype.includes('audio/mp3') && !audioFile.mimetype.includes('audio/mpeg')) {
-            response.status = 'error';
-            response.message = 'File must be MP3 format';
-            res.write(`data: ${JSON.stringify(response)}\n\n`);
-            res.end();
-            return;
-        }
-
-        
-
-        // Read file data
-        const audioBuffer = fs.readFileSync(audioFile.filepath);
+        // Convert to buffer
+        const audioBuffer = Buffer.from(await downloadData.arrayBuffer());
         const base64Audio = audioBuffer.toString('base64');
         const transcriptReqBody = getTranscriptReqBody(base64Audio);
-
-        const fileName = `${user.email}-${Date.now()}-${Math.random().toString(36).substring(2, 15)}.mp3`;
-        const storagePath = `audio-files/${fileName}`;
 
         // TRANSCRIBING RECORDING WITH GEMINI
         response.status = 'transcribing';
         response.message = 'Transcribing audio...';
         res.write(`data: ${JSON.stringify(response)}\n\n`);
-
 
         // Transcribe audio using Gemini API
         const transcriptResult = await geminiAPIReq(transcriptReqBody).catch(error => {
@@ -133,10 +105,6 @@ export default async function handler(req, res) {
             res.end();
             return;
         });
-
-        // console.log('Transcript Result:', transcriptResult);
-        // console.log('Upload Result:', uploadResult);
-
 
         response.status = 'transcription complete';
         response.message = 'Transcription complete!';
@@ -158,15 +126,10 @@ export default async function handler(req, res) {
             return;
         });
 
-        // console.log('SOAP Note and Billing Result:', soapNoteAndBillingResult);
-
         response.status = 'soap note complete';
         response.message = 'SOAP note and billing suggestion created successfully!';
         res.write(`data: ${JSON.stringify({ ...response, data: soapNoteAndBillingResult })}\n\n`);
         res.end();
-
-        // Clean up temporary file
-        fs.unlinkSync(audioFile.filepath);
 
     } catch (error) {
         console.error('Processing error:', error);

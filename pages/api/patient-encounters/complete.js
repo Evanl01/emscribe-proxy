@@ -1,9 +1,10 @@
-import supabase from '@/src/utils/supabase';
+import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { recordingSchema, transcriptSchema, soapNoteSchema } from '@/src/app/schemas';
 import formidable from 'formidable';
 import fs from 'fs';
 import th from 'zod/v4/locales/th.cjs';
+import { record } from 'zod';
 
 export const config = {
     api: {
@@ -12,6 +13,7 @@ export const config = {
 };
 
 export default async function handler(req, res) {
+    const supabase = getSupabaseClient(req.headers.authorization);
     const { user, error: authError } = await authenticateRequest(req);
     if (authError) return res.status(401).json({ error: authError });
 
@@ -30,76 +32,50 @@ export default async function handler(req, res) {
 
             // Step 1: Fetch recording
             console.log('Step 1: Fetching recording with id:', recording_id, 'user_id:', user.id);
-            const { data: recording, error: recError, count: recCount } = await supabase
+            const { data: recording, error: recError } = await supabase
                 .from('recordings')
                 .select('*')
                 .eq('id', recording_id)
-                .eq('user_id', user.id);
+                .single();
 
             if (recError) {
                 console.error('Recording query error:', recError);
                 return res.status(500).json({ error: 'Database error: ' + recError.message });
             }
 
-            if (!recording || recording.length === 0) {
-                console.error('No recording found for id:', recording_id, 'user_id:', user.id);
-                return res.status(404).json({ error: 'Recording not found or access denied' });
-            }
-
-            if (recording.length > 1) {
-                console.warn('Multiple recordings found (should not happen):', recording.length);
-            }
-
-            const recordingData = recording[0]; // Use first result
 
             // Step 2: Fetch transcript
-            console.log('Step 2: Fetching transcript for recording_id:', recordingData.id);
+            console.log('Step 2: Fetching transcript for recording_id:', recording.id);
             const { data: transcript, error: transError, count: transCount } = await supabase
                 .from('transcripts')
                 .select('*')
-                .eq('recording_id', recordingData.id);
+                .eq('recording_id', recording.id)
+                .single();
             if (transError) {
                 console.error('Transcript query error:', transError);
                 return res.status(500).json({ error: 'Database error: ' + transError.message });
             }
 
-            if (!transcript || transcript.length === 0) {
-                console.warn('No transcript found for recording_id:', recordingData.id);
-                // Return recording without transcript
-                const patient_encounter = {
-                    id: recordingData.id,
-                    name: recordingData.name,
-                    created_at: recordingData.created_at,
-                    audio_url: null,
-                    transcript: null,
-                };
-                console.log('Returning encounter without transcript:', patient_encounter);
-                return res.status(200).json(patient_encounter);
-            }
-
-            const transcriptData = transcript[0]; // Use first transcript
+            
+             // Use first transcript
 
             // Step 3: Fetch SOAP notes
-            console.log('Step 3: Fetching SOAP notes for transcript_id:', transcriptData.id);
+            console.log('Step 3: Fetching SOAP notes for transcript_id:', transcript.id);
             const { data: soapNotes, error: soapError, count: soapCount } = await supabase
                 .from('soapNotes')
                 .select('*')
-                .eq('transcript_id', transcriptData.id);
+                .eq('transcript_id', transcript.id);
             if (soapError) {
                 console.error('SOAP notes query error:', soapError);
                 return res.status(500).json({ error: 'Database error: ' + soapError.message });
             }
 
-            const transcriptWithSoapNotes = {
-                ...transcriptData,
-                soapNotes: soapNotes || [],
-            };
-            
+
             // Step 4: Generate signed URL for audio file
             console.log('Step 4: Generating signed URL for audio file');
             let audio_url = null;
-            if (recordingData.audio_file_path) {
-                let filePath = recordingData.audio_file_path;
+            if (recording.audio_file_path) {
+                let filePath = recording.audio_file_path;
                 // Remove 'audio-files/' prefix if present
                 if (filePath.startsWith('audio-files/')) {
                     filePath = filePath.replace(/^audio-files\//, '');
@@ -123,11 +99,10 @@ export default async function handler(req, res) {
 
             // Step 5: Prepare final response
             const patient_encounter = {
-                id: recordingData.id,
-                name: recordingData.name,
-                created_at: recordingData.created_at,
-                audio_url,
-                transcript: transcriptWithSoapNotes,
+                recording,
+                transcript,
+                soapNotes,
+                audio_url
             };
 
             console.log('=== Final Response ===');
@@ -143,7 +118,13 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: 'Internal server error: ' + err.message });
         }
     }
-    // POST /api/patient-encounters/complete
+
+
+
+
+
+
+    // POST /api/patient-encounters/complete----------------------------------------------------------------------------------------------
     else if (req.method == 'POST') {
 
         // Parse multipart form data (for MP3 upload)
@@ -178,59 +159,41 @@ export default async function handler(req, res) {
         //     console.log(`Field ${key}:`, fields[key]);
         // }
         const name = fields.name;
+        let audio_file_path = fields.audio_file_path.replace(/^audio-files\//, '');
         const transcript_text = fields.transcript_text;
         let soapNote_texts = fields.soapNote_text;
         if (!Array.isArray(soapNote_texts)) soapNote_texts = [soapNote_texts];
-        const audioFile = Array.isArray(files.recording) ? files.recording[0] : files.recording;
 
-        if (!name || !transcript_text || !audioFile || !soapNote_texts[0]) {
-            console.error('API error: Missing required fields', { name, transcript_text, audioFile, soapNote_texts });
-            return res.status(400).json({ error: 'Required fields: name, transcript_text, recording, soapNote_text' });
+        if (!name || !transcript_text || !audio_file_path || !soapNote_texts[0]) {
+            console.error('API error: Missing required fields', { name, transcript_text, audio_file_path, soapNote_texts });
+            return res.status(400).json({ error: 'Required fields: name, audio_file_path, transcript_text, soapNote_text' });
         }
 
-        // 1. Upload audio file to Supabase Storage
-        const audioBuffer = fs.readFileSync(audioFile.filepath);
-        const fileName = `${user.email}-${Date.now()}-${Math.random().toString(36).substring(2, 15)}.mp3`;
-        const storagePath = `audio-files/${fileName}`;
-        let uploadData, recording, transcript, soapNotes = [];
+        let soapNotesRes = [];
+        let recordingRes, transcriptRes;
+        // 1. Confirm audio file exists
         try {
-            // Upload audio
-            const uploadRes = await supabase.storage
+
+            const folder = audio_file_path.split('/')[0];
+            const filename = audio_file_path.split('/')[1];
+            const { data: fileData, error: fileError } = await supabase.storage
                 .from('audio-files')
-                .upload(fileName, audioBuffer, {
-                    contentType: 'audio/mp3',
-                    upsert: false
-                });
-            if (uploadRes.error) {
-                console.error('API error: Audio upload failed', uploadRes.error);
-                throw new Error('Audio upload failed: ' + uploadRes.error.message);
+                .list(folder);
+            if (fileError || !fileData || !fileData.find(f => f.name === filename)) {
+                console.error('API error: Audio file not found in Supabase Storage', { audio_file_path, fileError });
+                throw new Error('audio_file_path does not exist: ' + audio_file_path);
             }
-            console.log('Audio uploaded to:', uploadRes.data?.fullPath);
-            uploadData = uploadRes.data;
 
 
             // Create recording row
             // console.log('Creating recording row with data:', { name, audio_file_path: uploadData.fullPath, user_id: user.id });
-            const recordingSchemaResult = recordingSchema.safeParse({ name, audio_file_path: uploadRes.data.fullPath, user_id: user.id });
+            const recordingSchemaResult = recordingSchema.safeParse({ name, audio_file_path, user_id: user.id });
             if (!recordingSchemaResult.success) {
                 console.error('API error: Recording schema validation failed', recordingSchemaResult.error);
                 throw new Error('Recording schema validation failed: ' + recordingSchemaResult.error.message);
             }
-            
-            recording = recordingSchemaResult.data;
-            //Check if duplicate recording name exists
-            const { data: existingRecording, error: nameCheckError } = await supabase
-                .from('recordings')
-                .select('id')
-                .eq('user_id', user.id)
-                .eq('name', recording.name)
-                .maybeSingle();
 
-            if (nameCheckError) {
-                console.error('API error: Recording name check failed', nameCheckError);
-                throw new Error('Recording name check failed: ' + nameCheckError.message);
-            }
-
+            let recording = recordingSchemaResult.data;
             const recRes = await supabase
                 .from('recordings')
                 .insert([recording])
@@ -240,20 +203,20 @@ export default async function handler(req, res) {
                 console.error('API error: Recording save failed', recRes.error);
                 throw new Error('Recording save failed: ' + recRes.error.message);
             }
-            recording = recRes.data;
-            console.log('Recording saved:', recording);
+            recordingRes = recRes.data;
+            console.log('Recording saved:', recordingRes);
 
             // Create transcript row
-            console.log('Creating transcript row with data:', { transcript_text, recording_id: recording.id, user_id: user.id });
-            const transcriptSchemaResult = transcriptSchema.safeParse({ transcript_text, recording_id: recording.id, user_id: user.id });
+            console.log('Creating transcript row with data:', { transcript_text, recording_id: recordingRes.id, user_id: user.id });
+            const transcriptSchemaResult = transcriptSchema.safeParse({ transcript_text, recording_id: recordingRes.id, user_id: user.id });
             if (!transcriptSchemaResult.success) {
                 console.error('API error: Transcript schema validation failed', transcriptSchemaResult.error);
                 throw new Error('Transcript schema validation failed: ' + transcriptSchemaResult.error.message);
             }
-            transcript = transcriptSchemaResult.data;
+            
             const transRes = await supabase
                 .from('transcripts')
-                .insert([transcript])
+                .insert([transcriptSchemaResult.data])
                 .select()
                 .single();
             if (transRes.error) throw new Error('Transcript save failed: ' + transRes.error.message);
@@ -261,14 +224,13 @@ export default async function handler(req, res) {
                 console.error('API error: Transcript save failed', transRes.error);
                 throw new Error('Transcript save failed: ' + transRes.error.message);
             }
-            transcript = transRes.data;
-            console.log('Transcript saved:', transcript.id);
+            transcriptRes = transRes.data;
+            console.log('Transcript saved:', transcriptRes);
 
             // Create soapNotes (can be multiple)
             for (const soapNote_text of soapNote_texts) {
                 if (!soapNote_text) continue;
                 //expecting soapNote_text to be a jsonb object
-                console.log('Creating SOAP note with text:', soapNote_text);
                 let soapNote_textObject = soapNote_text.trim();
                 if (typeof soapNote_textObject === "string") {
                     try {
@@ -278,13 +240,30 @@ export default async function handler(req, res) {
                         throw new Error('SOAP note is not valid JSON');
                     }
                 }
-                console.log('Parsed SOAP note text:', soapNote_textObject);
-                const soapNoteSchemaResult = soapNoteSchema.safeParse({ soapNote_text: soapNote_textObject, transcript_id: transcript.id, user_id: user.id });
+
+                const orderedSoapNote = {
+                    subjective: soapNote_textObject?.soapNote?.subjective || "",
+                    objective: soapNote_textObject?.soapNote?.objective || "",
+                    assessment: soapNote_textObject?.soapNote?.assessment || "",
+                    plan: soapNote_textObject?.soapNote?.plan || "",
+                };
+                const orderedBillingSuggestion = {
+                    icd10: soapNote_textObject?.billingSuggestion?.icd10 || "",
+                    cpt: soapNote_textObject?.billingSuggestion?.cpt || "",
+                    additional_inquiries: soapNote_textObject?.billingSuggestion?.additional_inquiries || "",
+                }
+
+                const orderedSoapNoteTextObject = {
+                    soapNote: orderedSoapNote,
+                    billingSuggestion: soapNote_textObject?.billingSuggestion || {},
+                };
+                console.log('Parsed, ordered SOAP note text:', orderedSoapNoteTextObject);
+                const soapNoteSchemaResult = soapNoteSchema.safeParse({ soapNote_text: orderedSoapNoteTextObject, transcript_id: transcriptRes.id, user_id: user.id });
                 if (!soapNoteSchemaResult.success) {
                     console.error('API error: SOAP note schema validation failed', soapNoteSchemaResult.error);
                     throw new Error('SOAP note schema validation failed: ' + soapNoteSchemaResult.error.message);
                 }
-                const soapNote = soapNoteSchemaResult.data;
+                let soapNote = soapNoteSchemaResult.data;
                 const soapRes = await supabase
                     .from('soapNotes')
                     .insert([soapNote])
@@ -295,37 +274,38 @@ export default async function handler(req, res) {
                     console.error('API error: SOAP note save failed', soapRes.error);
                     throw new Error('SOAP note save failed: ' + soapRes.error.message);
                 }
-                soapNotes.push(soapRes.data);
+                
+                soapNotesRes.push(soapRes.data);
             }
 
-            // Clean up temp file
-            fs.unlinkSync(audioFile.filepath);
 
             return res.status(201).json({
-                recording,
-                transcript,
-                soapNotes
+                recordingRes,
+                transcriptRes,
+                soapNotesRes
             });
         } catch (err) {
             // Rollback all previous steps. Start from soapNotes, which FK references transcript, which FK references recording
-            if (soapNotes.length > 0 && transcript && transcript.id) {
-                await supabase.from('soapNotes').delete().eq('transcript_id', transcript.id);
+            if (soapNotesRes && soapNotesRes.length > 0 && transcriptRes && transcriptRes.id) {
+                await supabase.from('soapNotes').delete().eq('transcript_id', transcriptRes.id);
             }
-            if (transcript && transcript.id) {
-                await supabase.from('transcripts').delete().eq('id', transcript.id);
+            if (transcriptRes && transcriptRes.id) {
+                await supabase.from('transcripts').delete().eq('id', transcriptRes.id);
             }
-            if (recording && recording.id) {
-                await supabase.from('recordings').delete().eq('id', recording.id);
+            if (recordingRes && recordingRes.id) {
+                await supabase.from('recordings').delete().eq('id', recordingRes.id);
             }
-            if (uploadData && uploadData.path) {
-                await supabase.storage.from('audio-files').remove([uploadData.path]);
-            }
-            if (audioFile && audioFile.filepath && fs.existsSync(audioFile.filepath)) {
-                try { fs.unlinkSync(audioFile.filepath); } catch (e) { }
-            }
+            // Skip file deletion, let users retry saving in frontend.
+            // if( audio_file_path){
+            //     audio_file_path = audio_file_path.replace(/^audio-files\//, '');
+            //     await supabase.storage.from('audio-files').remove([audio_file_path]);
+            // }
             console.error('API error:', err);
             if (err.stack) {
                 console.error('Stack trace:', err.stack);
+            }
+            if(err.message.includes('unique')){
+                err.message = 'Recording with this name already exists. Please choose a different name.';
             }
             return res.status(500).json({ error: err.message });
         }
