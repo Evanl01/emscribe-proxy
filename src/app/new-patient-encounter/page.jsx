@@ -15,7 +15,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-export default function NewRecording() {
+export default function NewPatientEncounter() {
   const router = useRouter();
 
   // State management
