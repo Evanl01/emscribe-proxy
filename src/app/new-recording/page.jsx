@@ -8,6 +8,7 @@ import * as validation from "@/public/scripts/validation.js";
 import { createClient } from "@supabase/supabase-js";
 // import * as auth  from "@/src/utils/Auth.jsx";
 import Auth from "@/src/utils/Auth.jsx";
+import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPreviewOverlay";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -31,6 +32,13 @@ export default function NewRecording() {
   const [soapPlan, setSoapPlan] = useState("");
   const [billingSuggestion, setBillingSuggestion] = useState("");
   const [patientEncounterName, setPatientEncounterName] = useState("");
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewSection, setPreviewSection] = useState("transcript");
+  const [reviewedSections, setReviewedSections] = useState({
+    transcript: false,
+    soapNote: false,
+    billingSuggestion: false,
+  });
 
   // For rich text editing
   const handleEditableChange = (setter) => (e) => {
@@ -126,7 +134,7 @@ export default function NewRecording() {
   const [audioLoadingState, setAudioLoadingState] = useState("idle");
 
   // Update audioUrl when recordingFile changes
-  React.useEffect(() => {
+  useEffect(() => {
     if (recordingFile) {
       const url = URL.createObjectURL(recordingFile);
       setAudioUrl(url);
@@ -328,7 +336,8 @@ export default function NewRecording() {
       // Always derive extension from uploaded file name, fallback to empty string if not found
       const originalName = file.name || "audio";
       const lastDot = originalName.lastIndexOf(".");
-      const extension = lastDot !== -1 ? originalName.substring(lastDot + 1).toLowerCase() : "";
+      const extension =
+        lastDot !== -1 ? originalName.substring(lastDot + 1).toLowerCase() : "";
       const fileName = `${userEmail}-${Date.now()}-${Math.floor(
         Math.random() * 100
       )
@@ -529,7 +538,8 @@ export default function NewRecording() {
         let extension = "";
         if (recordingFile && recordingFile.name) {
           const lastDot = recordingFile.name.lastIndexOf(".");
-          if (lastDot !== -1) extension = recordingFile.name.substring(lastDot + 1).toLowerCase();
+          if (lastDot !== -1)
+            extension = recordingFile.name.substring(lastDot + 1).toLowerCase();
         }
         const fileName = `${userEmail}-${Date.now()}-${Math.floor(
           Math.random() * 100
@@ -720,12 +730,10 @@ export default function NewRecording() {
     if (!soapPlan.trim()) missingFields.push("Plan");
     if (!billingSuggestion.trim()) missingFields.push("Billing Suggestion");
     if (missingFields.length > 0) {
-      setErrorMessage(
+      alert(
         "Required field(s): " + missingFields.map((f) => `${f}`).join(", ")
       );
       return;
-    } else {
-      setErrorMessage("");
     }
 
     setIsSaving(true);
@@ -962,7 +970,9 @@ export default function NewRecording() {
                         }`}
                         data-path={(() => {
                           try {
-                            const metadataStr = localStorage.getItem("emscribe_audioFileMetadata");
+                            const metadataStr = localStorage.getItem(
+                              "emscribe_audioFileMetadata"
+                            );
                             if (metadataStr) {
                               const metadata = JSON.parse(metadataStr);
                               return metadata.path || "";
@@ -1102,8 +1112,8 @@ export default function NewRecording() {
 
           {activeSection === "review" && (
             <div className="p-6 border-t border-gray-200">
-              {/* Patient Encounter Name */}
-              <div className="mb-6">
+              Patient Encounter Name
+              {/* <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Patient Encounter Name
                 </label>
@@ -1115,7 +1125,7 @@ export default function NewRecording() {
                   placeholder="Enter patient encounter name"
                   disabled={isSaving}
                 />
-              </div>
+              </div> */}
 
               {/* Status Messages */}
               {currentStatus && (
@@ -1220,15 +1230,13 @@ export default function NewRecording() {
               {/* Save Button (always enabled, but checks required fields before saving) */}
               <div className="flex flex-col items-end">
                 <button
-                  onClick={saveTranscriptAndNote}
+                  onClick={() => setShowPreview(true)}
                   disabled={isSaving}
                   className={`bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-medium ${
                     isSaving ? "opacity-50 cursor-not-allowed" : ""
                   }`}
                 >
-                  {isSaving
-                    ? "Saving..."
-                    : "Save Transcript and Generated Note"}
+                  Preview
                 </button>
                 {errorMessage && (
                   <div className="mt-3 text-red-600 text-sm text-right w-full">
@@ -1240,6 +1248,28 @@ export default function NewRecording() {
           )}
         </div>
       </div>
+      <PatientEncounterPreviewOverlay
+        isOpen={showPreview}
+        onClose={() => setShowPreview(false)}
+        transcript={transcript}
+        setTranscript={setTranscript}
+        soapSubjective={soapSubjective}
+        setSoapSubjective={setSoapSubjective}
+        soapObjective={soapObjective}
+        setSoapObjective={setSoapObjective}
+        soapAssessment={soapAssessment}
+        setSoapAssessment={setSoapAssessment}
+        soapPlan={soapPlan}
+        setSoapPlan={setSoapPlan}
+        billingSuggestion={billingSuggestion}
+        setBillingSuggestion={setBillingSuggestion}
+        patientEncounterName={patientEncounterName}
+        setPatientEncounterName={setPatientEncounterName}
+        onSave={saveTranscriptAndNote}
+        isSaving={isSaving}
+        errorMessage={errorMessage}
+        // Optionally pass previewSection and reviewedSections if you want to control them from parent
+      />
     </>
   );
 }
