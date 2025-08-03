@@ -40,8 +40,29 @@ export function mapErrorMessage(errorMsg) {
   if (/storage quota exceeded/i.test(errorMsg)) {
     return 'Storage limit reached. Please delete old files or contact support.';
   }
-  if(/foreign key constraint/i.test(errorMsg)) {
+  if (/foreign key constraint/i.test(errorMsg)) {
     return 'This record is linked to other data in the database and cannot be deleted.';
+  }
+  if (/ZodError/i.test(errorMsg)) {
+    // Try to extract and format the error details
+    try {
+      const match = errorMsg.match(/\[(.*)\]/s);
+      if (match && match[1]) {
+        const details = JSON.parse(match[0]);
+        if (Array.isArray(details)) {
+          return details
+            .map(
+              (err) =>
+                `${err.message}${err.path && err.path.length ? ` (at ${err.path.join('.')})` : ''}`
+            )
+            .join('; ');
+        }
+      }
+    } catch (e) {
+      // Fallback if parsing fails
+      return 'Invalid form data. Please check your entries and try again.';
+    }
+    return 'Invalid form data. Please check your entries and try again.';
   }
   // Add more rules as needed
 

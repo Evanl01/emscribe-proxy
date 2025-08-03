@@ -3,8 +3,6 @@
 import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { recordingSchema } from '@/src/app/schemas';
-import formidable from 'formidable';
-import fs from 'fs';
 import { getTranscriptReqBody, getSoapNoteAndBillingRequestBody } from '@/src/utils/geminiRequestBodies'; // Adjust the import path as needed
 
 const recordingTableName = 'recordings';
@@ -49,24 +47,24 @@ export default async function handler(req, res) {
         response.message = 'Processing started...';
         res.write(`data: ${JSON.stringify(response)}\n\n`);
 
-        // Expect JSON body with audio_file_path
+        // Expect JSON body with recording_file_path
         let body = '';
         req.on('data', chunk => { body += chunk; });
         await new Promise(resolve => req.on('end', resolve));
-        let audioFilePath;
+        let recording_file_path;
         try {
             const parsed = JSON.parse(body);
-            audioFilePath = parsed.audio_file_path;
+            recording_file_path = parsed.recording_file_path;
         } catch (e) {
             response.status = 'error';
-            response.message = 'Invalid JSON body or missing audio_file_path';
+            response.message = 'Invalid JSON body or missing recording_file_path';
             res.write(`data: ${JSON.stringify(response)}\n\n`);
             res.end();
             return;
         }
-        if (!audioFilePath) {
+        if (!recording_file_path) {
             response.status = 'error';
-            response.message = 'audio_file_path is required';
+            response.message = 'recording_file_path is required';
             res.write(`data: ${JSON.stringify(response)}\n\n`);
             res.end();
             return;
@@ -79,7 +77,7 @@ export default async function handler(req, res) {
         // Download file from Supabase Storage
         const { data: downloadData, error: downloadError } = await supabase.storage
             .from('audio-files')
-            .download(audioFilePath);
+            .download(recording_file_path);
         if (downloadError || !downloadData) {
             response.status = 'error';
             response.message = `Failed to download audio file: ${downloadError?.message || 'Unknown error'}`;
@@ -188,7 +186,7 @@ async function geminiAPIReq(reqBody) {
 //         throw new Error(`Storage upload failed: ${uploadError.message}`);
 //     }
 //     //create recording object using recordingSchema
-//     const parseResult = recordingSchema.safeParse({ audio_file_path: uploadData.fullPath, name: fileName, user_id: userId });
+//     const parseResult = recordingSchema.safeParse({ recording_file_path: uploadData.fullPath, name: fileName, user_id: userId });
 //     if (!parseResult.success) {
 //         throw new Error(`Schema validation failed: ${parseResult.error.errors.map(e => e.message).join(', ')}`);
 //     }

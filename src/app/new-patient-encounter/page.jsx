@@ -372,6 +372,7 @@ export default function NewPatientEncounter() {
     } catch (error) {
       setIsSaving(false);
       setCurrentStatus({ status: "error", message: error.message });
+      setIsProcessing(false);
       console.error("Error processing or uploading audio file:", error);
       alert(
         "Error processing or uploading audio file. Please ensure it's a valid audio file."
@@ -506,7 +507,7 @@ export default function NewPatientEncounter() {
     });
 
     try {
-      let audioFilePath = "";
+      let recording_file_path = "";
 
       // Check if we have existing uploaded file metadata
       const metadataStr = localStorage.getItem("emscribe_audioFileMetadata");
@@ -517,7 +518,7 @@ export default function NewPatientEncounter() {
         if (!metadata.path) {
           throw new Error("Audio file path missing in metadata.");
         }
-        audioFilePath = metadata.path;
+        recording_file_path = metadata.path;
       } else if (recordingFile) {
         // File was recorded - need to upload it first
         setCurrentStatus({
@@ -567,7 +568,7 @@ export default function NewPatientEncounter() {
           "emscribe_audioFileMetadata",
           JSON.stringify(metadata)
         );
-        audioFilePath = data.path;
+        recording_file_path = data.path;
 
         setCurrentStatus({
           status: "processing",
@@ -579,8 +580,8 @@ export default function NewPatientEncounter() {
         );
       }
 
-      // Now proceed with the API call using audioFilePath
-      const payload = { audio_file_path: audioFilePath };
+      // Now proceed with the API call using recording_file_path
+      const payload = { recording_file_path: recording_file_path };
       const response = await fetch("/api/prompt-llm", {
         headers: {
           "Content-Type": "application/json",
@@ -773,42 +774,46 @@ export default function NewPatientEncounter() {
 
       // Use new complete endpoint for mass save
 
-      const formData = new FormData();
-      formData.append("name", patientEncounterName);
-      // Get audio_file_path from localStorage metadata
+      // Get recording_file_path from localStorage metadata
       const audioFileMetadata = localStorage.getItem(
         "emscribe_audioFileMetadata"
       );
-      let audio_file_path = "";
+      let recording_file_path = "";
       if (audioFileMetadata) {
         try {
           const metadataObj = JSON.parse(audioFileMetadata);
-          audio_file_path = metadataObj.path || "";
+          recording_file_path = metadataObj.path || "";
         } catch (e) {
-          audio_file_path = "";
+          recording_file_path = "";
         }
       }
-      formData.append("audio_file_path", audio_file_path);
-      formData.append("transcript_text", transcript);
+
       //merge SOAP note and billing suggestion into soapNote_text jsonObject
-      let soapNoteText = JSON.stringify({
+      const soapNoteText = JSON.stringify({
         soapNote: soapNoteObject,
         billingSuggestion: billingSuggestionObject,
       });
-      formData.append("soapNote_text", soapNoteText);
+
+      const patientEncounter = {
+        name: patientEncounterName,
+        recording_file_path: recording_file_path,
+        transcript_text: transcript,
+      };
 
       console.log("Saving patient encounter with data:", {
-        name: patientEncounterName,
-        recording: recordingFile,
-        transcript_text: transcript,
-        soapNote_text: soapNoteText,
+        patientEncounter,
+        soapNoteText,
       });
       const response = await fetch("/api/patient-encounters/complete", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${api.getJWT()}`,
+          'Content-Type': 'application/json',
         },
-        body: formData,
+        body: JSON.stringify({
+          soapNote_text: soapNoteText,
+          patientEncounter: patientEncounter,
+        }),
       });
       console.log("Save response:", response);
 
@@ -1103,7 +1108,7 @@ export default function NewPatientEncounter() {
             disabled={!soapNoteRequested}
           >
             <span className="text-lg font-semibold">
-              2. Review Transcript and Generated Note
+              2. Edit Generated Transcript and SOAP Note
             </span>
             <span className="text-xl">
               {activeSection === "review" ? "−" : "+"}
@@ -1112,7 +1117,6 @@ export default function NewPatientEncounter() {
 
           {activeSection === "review" && (
             <div className="p-6 border-t border-gray-200">
-              Patient Encounter Name
               {/* <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Patient Encounter Name
@@ -1145,7 +1149,7 @@ export default function NewPatientEncounter() {
 
               {/* Transcript (Rich Text) */}
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
                   Transcript
                 </label>
                 <textarea
@@ -1160,7 +1164,7 @@ export default function NewPatientEncounter() {
 
               {/* SOAP Note (S/O/A/P) */}
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
                   Subjective
                 </label>
                 <textarea
@@ -1173,7 +1177,7 @@ export default function NewPatientEncounter() {
                 />
               </div>
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
                   Objective
                 </label>
                 <textarea
@@ -1186,7 +1190,7 @@ export default function NewPatientEncounter() {
                 />
               </div>
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
                   Assessment
                 </label>
                 <textarea
@@ -1199,7 +1203,7 @@ export default function NewPatientEncounter() {
                 />
               </div>
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
                   Plan
                 </label>
                 <textarea
@@ -1214,7 +1218,7 @@ export default function NewPatientEncounter() {
 
               {/* Billing Suggestion (Rich Text) */}
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
                   Billing Suggestion
                 </label>
                 <textarea

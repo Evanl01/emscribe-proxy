@@ -1,3 +1,5 @@
+import { property } from "zod";
+
 const SchemaType = {
     OBJECT: "object",
     STRING: "string"
@@ -67,6 +69,7 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                                     allergies: { type: SchemaType.STRING, description: "Known allergies" }
                                 },
                                 required: ["chief_complaint", "hpi", "history", "ros", "medications", "allergies"],
+                                propertyOrdering: ["chief_complaint", "hpi", "history", "ros", "medications", "allergies"],
                             },
                             objective: {
                                 type: SchemaType.OBJECT,
@@ -78,7 +81,8 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                                     musculoskeletal: { type: SchemaType.STRING, description: "Musculoskeletal exam findings" },
                                     other: { type: SchemaType.STRING, description: "Other objective findings" }
                                 },
-                                required: ["heent", "general", "cardiovascular", "musculoskeletal", "other"]
+                                required: ["heent", "general", "cardiovascular", "musculoskeletal", "other"],
+                                propertyOrdering: ["heent", "general", "cardiovascular", "musculoskeletal", "other"]
                             },
                             assessment: {
                                 type: SchemaType.STRING,

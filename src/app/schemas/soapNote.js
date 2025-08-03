@@ -7,7 +7,7 @@ export const soapNoteSchema = z.object({
   created_at: z.string().regex(isoDatetimeRegex, 'Invalid ISO datetime').optional(),
   updated_at: z.string().regex(isoDatetimeRegex, 'Invalid ISO datetime').default(() => new Date().toISOString()).optional(),
   user_id: z.string().regex(uuidRegex, 'Invalid UUID').optional(),
-  transcript_id: z.number().int().optional(), // int8 in SQL, optional for auto-increment
+  patientEncounter_id: z.number().int().optional(), // int8 in SQL, optional for auto-increment
   soapNote_text: z.object({
     soapNote: z.object({
       subjective: z.string(),

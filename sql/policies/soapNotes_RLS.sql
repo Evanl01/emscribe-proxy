@@ -26,29 +26,31 @@ with check (
 
 
 -- INSERT policy
-DROP POLICY IF EXISTS "Users can insert soapNotes (if they own FK transcript_id)" ON public."soapNotes";
-CREATE POLICY "Users can insert soapNotes (if they own FK transcript_id)"
+DROP POLICY IF EXISTS "Users can insert soapNotes (if they own FK patientEncounter_id)" ON public."soapNotes";
+
+CREATE POLICY "Users can insert soapNotes (if they own FK patientEncounter_id)"
 ON public."soapNotes"
 AS PERMISSIVE
 FOR INSERT
 TO authenticated
 WITH CHECK (
   user_id = (SELECT auth.uid()) AND
-  transcript_id IN (
-    SELECT id FROM transcripts WHERE user_id = (SELECT auth.uid())
+  "patientEncounter_id" IN (
+    SELECT id FROM public."patientEncounters" WHERE user_id = (SELECT auth.uid())
   )
 );
 
 -- UPDATE policy
-DROP POLICY IF EXISTS "Users can update soapNotes (if they own FK transcript_id)" ON public."soapNotes";
-CREATE POLICY "Users can update soapNotes (if they own FK transcript_id)"
+DROP POLICY IF EXISTS "Users can update soapNotes (if they own FK patientEncounter_id)" ON public."soapNotes";
+
+CREATE POLICY "Users can update soapNotes (if they own FK patientEncounter_id)"
 ON public."soapNotes"
 AS PERMISSIVE
 FOR UPDATE
 TO authenticated
 WITH CHECK (
   user_id = (SELECT auth.uid()) AND
-  transcript_id IN (
-    SELECT id FROM transcripts WHERE user_id = (SELECT auth.uid())
+  "patientEncounter_id" IN (
+    SELECT id FROM public."patientEncounters" WHERE user_id = (SELECT auth.uid())
   )
 );

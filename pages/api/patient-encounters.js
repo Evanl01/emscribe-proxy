@@ -1,73 +1,95 @@
 import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
+import { patientEncounterSchema } from '@/src/app/schemas/patientEncounter';
+
+const patientEncounterTable = 'patientEncounters';
 
 export default async function handler(req, res) {
     const supabase = getSupabaseClient(req.headers.authorization);
     const { user, error: authError } = await authenticateRequest(req);
     if (authError) return res.status(401).json({ error: authError });
 
-    if (req.method !== 'GET') {
-        return res.status(405).json({ error: 'Method not allowed' });
+    if (req.method == 'GET') {
+        try {
+            const id = req.query.id;
+            if (!id) return res.status(400).json({ error: 'id is required' });
+
+            const { data: patientEncounter, error: patientEncounterError } = await supabase
+                .from(patientEncounterTable)
+                .select('*')
+                .eq('id', id)
+                .order('updated_at', { ascending: false });
+
+            if (patientEncounterError) return res.status(500).json({ error: patientEncounterError.message });
+
+
+            return res.status(200).json({ success: true, data });
+        }
+        catch (err) {
+            return res.status(500).json({ error: err.message });
+        }
+    }
+    else if (req.method === 'POST') {
+        const parseResult = patientEncounterSchema.safeParse(req.body);
+        if (!parseResult.success) {
+            return res.status(400).json({ error: parseResult.error });
+        }
+        const patientEncounter = parseResult.data;
+        if (!patientEncounter.name || !patientEncounter.recording_file_path) {
+            return res.status(400).json({ error: 'name and recording_file_path are required' });
+        }
+        patientEncounter.user_id = user.id; // Ensure user_id is set to the authenticated user's ID
+
+        const { data, error } = await supabase
+            .from(patientEncounterTable)
+            .insert([patientEncounter])
+            .select()
+            .single();
+
+        if (error) return res.status(500).json({ error: error.message });
+        return res.status(200).json({ success: true, data });
     }
 
-    try {
-        const recording_id = req.query.recording_id;
-        if (!recording_id) {
-            return res.status(400).json({ error: 'Recording ID is required' });
+
+    // PATCH ------------------------------------------------------------------------
+    if (req.method === 'PATCH') {
+        const parseResult = patientEncounterSchema.partial().safeParse(req.body);
+        if (!parseResult.success) {
+            return res.status(400).json({ error: parseResult.error });
         }
-        // Fetch recording matching the recording_id and user_id
-        const { data: recording, error: recError } = await supabase
-            .from('recordings')
-            .select('*')
-            .eq('id', recording_id)
-            .eq('user_id', user.id)
-            .order('created_at', { ascending: false });
-
-        if (recError) return res.status(500).json({ error: recError.message });
-
-
-        // Fetch transcript for this recording
-        const { data: transcript, error: transError } = await supabase
-            .from('transcripts')
-            .select('*')
-            .eq('recording_id', recording.id);
-
-        if (transError) throw new Error(transError.message);
-
-        // Only use the first transcript (if any)
-        let transcriptWithSoapNotes = null;
-        const { data: soapNotes, error: soapError } = await supabase
-            .from('soapNotes')
-            .select('*')
-            .eq('transcript_id', transcript.id);
-
-        if (soapError) throw new Error(soapError.message);
-
-        transcriptWithSoapNotes = {
-            ...transcript,
-            soapNotes: soapNotes || [],
-        };
-        // Generate signed URL for audio file if present
-        let audio_url = null;
-        if (recording.audio_file_path) {
-            const { data: signedData, error: signedError } = await supabase.storage
-                .from('audio-files')
-                .createSignedUrl(recording.audio_file_path, 60 * 60);
-            if (signedError) throw new Error(signedError.message);
-            audio_url = signedData?.signedUrl || null;
+        const patientEncounter = parseResult.data;
+        if (!patientEncounter.id) {
+            return res.status(400).json({ error: 'id is required' });
         }
 
-        const patient_encounter = {
-            id: recording.id,
-            name: recording.name,
-            created_at: recording.created_at,
-            audio_url,
-            transcript: transcriptWithSoapNotes,
-        };
 
-        return res.status(200).json({ patient_encounter });
+        const { data, error } = await supabase
+            .from(patientEncounterTable)
+            .update(patientEncounter)
+            .eq('id', patientEncounter.id)
+            .select();
+        if (error) return res.status(500).json({ error: error.message });
+        return res.status(200).json(data);
+    }
 
-    } catch (err) {
-        return res.status(500).json({ error: err.message });
+
+    // DELETE ------------------------------------------------------------------------
+    if (req.method === 'DELETE') {
+        const { id } = req.query;
+        if (!id) return res.status(400).json({ error: 'id is required' });
+        // Validate ownership before deleting
+        const { data, error } = await supabase
+            .from(patientEncounterTable)
+            .delete()
+            .eq('id', id)
+            .select()
+            .single();
+        if (error) return res.status(500).json({ error: error.message });
+        return res.status(200).json({ success: true, data });
+    }
+
+
+    else {
+        return res.status(405).json({ error: 'Method not allowed' });
     }
 }
