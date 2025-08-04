@@ -16,6 +16,7 @@
     "next": "15.4.2",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "styled-components": "^6.1.19",
     "uuid": "^11.1.0",
     "zod": "^4.0.8"
   },

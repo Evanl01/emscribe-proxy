@@ -61,15 +61,15 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                                 type: SchemaType.OBJECT,
                                 description: "Subjective findings - what the patient reports (symptoms, concerns, history)",
                                 properties: {
-                                    chief_complaint: { type: SchemaType.STRING, description: "Chief complaint of the patient" },
+                                    "chief complaint": { type: SchemaType.STRING, description: "Chief complaint of the patient" },
                                     hpi: { type: SchemaType.STRING, description: "History of Present Illness" },
                                     history: { type: SchemaType.STRING, description: "Past medical, surgical, family, and social history" },
                                     ros: { type: SchemaType.STRING, description: "Review of Systems" },
                                     medications: { type: SchemaType.STRING, description: "Current medications" },
                                     allergies: { type: SchemaType.STRING, description: "Known allergies" }
                                 },
-                                required: ["chief_complaint", "hpi", "history", "ros", "medications", "allergies"],
-                                propertyOrdering: ["chief_complaint", "hpi", "history", "ros", "medications", "allergies"],
+                                required: ["chief complaint", "hpi", "history", "ros", "medications", "allergies"],
+                                property: ["chief complaint", "hpi", "history", "ros", "medications", "allergies"],
                             },
                             objective: {
                                 type: SchemaType.OBJECT,

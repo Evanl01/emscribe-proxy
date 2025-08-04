@@ -15,30 +15,75 @@ export default async function handler(req, res) {
     if (authError) return res.status(401).json({ error: authError });
 
     if (req.method == 'GET') {
+        const id = req.query.id;
+        if (!id) return res.status(400).json({ error: 'id is required' });
         console.log(patientEncounterTable, user.id);
-        const { data, error, count } = await supabase
+        const { data, error: patientEncounterError, count } = await supabase
             .from(patientEncounterTable)
             .select('*')
             .eq('user_id', user.id)
+            .eq('id', id)
+            .single();
+
+        let patientEncounterData = data;
+        if (patientEncounterError) return res.status(500).json({ error: patientEncounterError.message });
+        console.log('Fetched Patient Encounter: id: ', patientEncounterData.id, ", recording_file_path:", patientEncounterData.recording_file_path);
+
+        if (!patientEncounterData || !patientEncounterData.id) {
+            return res.status(404).json({ error: 'Patient Encounter not found for id:' + id });
+        }
+
+        // Create signed URLs for audio files
+        const needNewSignedUrl = !patientEncounterData.recording_file_signed_url || new Date(patientEncounterData.recording_file_signed_url_expiry) < new Date();
+        if (patientEncounterData.recording_file_path && needNewSignedUrl) {
+            const expirySeconds = 60 * 60; // 1 hour
+
+            // console.log('Creating signed URL for recording file:', patientEncounterData.recording_file_path);
+            patientEncounterData.recording_file_path = patientEncounterData.recording_file_path.replace(/^audio-files\//, '');
+            const { data: signedUrlData, error: signedUrlError } = await supabase
+                .storage
+                .from('audio-files')
+                .createSignedUrl(patientEncounterData.recording_file_path, expirySeconds); // 1 hour expiry
+            if (signedUrlError) {
+                console.error('Error creating signed URL:', signedUrlError.message);
+                return res.status(500).json({ error: signedUrlError.message });
+            }
+            console.log('Created signed URL for recording file:', signedUrlData);
+            // Update signed URL and expiry in patientEncounter in supabase
+            const now = new Date();
+            const expiresAt = new Date(now.getTime() + expirySeconds * 1000).toISOString();
+            const { data: updateData, error: updateError } = await supabase
+                .from(patientEncounterTable)
+                .update({
+                    recording_file_signed_url: signedUrlData.signedUrl,
+                    recording_file_signed_url_expiry: expiresAt,
+                })
+                .eq('id', patientEncounterData.id)
+                .select()
+                .single();
+            if (updateError) {
+                console.error('Error updating Patient Encounter with recording file signed URL:', updateError.message);
+                return res.status(500).json({ error: updateError.message });
+            }
+            patientEncounterData = updateData;
+        }
+
+
+        // Fetch related SOAP Notes
+        const { data: soapNotes, error: soapNoteError } = await supabase
+            .from(soapNoteTable)
+            .select('*')
+            .eq('patientEncounter_id', patientEncounterData.id)
             .order('created_at', { ascending: false });
-        if (error) return res.status(500).json({ error: error.message });
-        console.log('Patient Encounters:', data);
+        if (soapNoteError) return res.status(500).json({ error: soapNoteError.message });
+        patientEncounterData.soapNotes = soapNotes;
 
-        if (!data || data.length === 0) {
-            return res.status(200).json({ patientEncounters: [] });
-        }
-        for (const patientEncounter of data) {
-            const { data: soapNotes, error: soapNoteError } = await supabase
-                .from(soapNoteTable)
-                .select('*')
-                .eq('patientEncounter_id', patientEncounter.id)
-                .order('created_at', { ascending: false });
-            if (soapNoteError) return res.status(500).json({ error: soapNoteError.message });
-            patientEncounter.soapNotes = soapNotes;
-        }
+        // console.log('Fetched Patient Encounter with SOAP Notes:', patientEncounter);
 
-        return res.status(200).json({ patientEncounters: data, count });
+        return res.status(200).json({ patientEncounter: patientEncounterData });
     }
+
+
 
 
 
@@ -118,5 +163,26 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: err.message });
         }
     }
+
+    if (req.method === 'PATCH') {
+        const parseResult = patientEncounterSchema.partial().safeParse(req.body);
+        if (!parseResult.success) {
+            return res.status(400).json({ error: parseResult.error });
+        }
+        const patientEncounter = parseResult.data;
+        if (!patientEncounter.id) {
+            return res.status(400).json({ error: 'id is required' });
+        }
+
+
+        const { data, error } = await supabase
+            .from(patientEncounterTable)
+            .update(patientEncounter)
+            .eq('id', patientEncounter.id)
+            .select();
+        if (error) return res.status(500).json({ error: error.message });
+        return res.status(200).json(data);
+    }
+
     return res.status(405).json({ error: 'Method not allowed' });
 }

@@ -21,8 +21,9 @@ export default function PatientEncounterPreviewOverlay({
   onSave,
   isSaving,
   errorMessage,
+  sections = ["transcript", "soapNote", "billingSuggestion"], // default to all
 }) {
-  const [previewSection, setPreviewSection] = useState("transcript");
+  const [previewSection, setPreviewSection] = useState(sections[0]);
 
   const transcriptRef = useRef(null);
   const subjectiveRef = useRef(null);
@@ -31,17 +32,18 @@ export default function PatientEncounterPreviewOverlay({
   const planRef = useRef(null);
   const billingSuggestionRef = useRef(null);
 
-  const menuSections = [
+  const allMenuSections = [
     { key: "transcript", label: "Transcript" },
     { key: "soapNote", label: "SOAP Note" },
     { key: "billingSuggestion", label: "Billing Suggestion" },
   ];
+  const menuSections = allMenuSections.filter((s) => sections.includes(s.key));
 
-  const [reviewedSections, setReviewedSections] = useState({
-    transcript: false,
-    soapNote: false,
-    billingSuggestion: false,
-  });
+  // Only track reviewed for shown sections
+  const initialReviewed = Object.fromEntries(
+    menuSections.map((s) => [s.key, false])
+  );
+  const [reviewedSections, setReviewedSections] = useState(initialReviewed);
   useEffect(() => {
     const refs = [
       transcriptRef,
@@ -53,8 +55,8 @@ export default function PatientEncounterPreviewOverlay({
     ];
     refs.forEach((ref) => {
       if (ref.current) {
-        ref.current.style.height = "auto"; // Reset height
-        ref.current.style.height = ref.current.scrollHeight + "px"; // Adjust to content
+        ref.current.style.height = "auto";
+        ref.current.style.height = ref.current.scrollHeight + "px";
       }
     });
   }, [
@@ -96,7 +98,7 @@ export default function PatientEncounterPreviewOverlay({
     // If on billingSuggestion, and not all reviewed, go to next unreviewed
     if (previewSection === "billingSuggestion") {
       const unreviewed = menuSections.find((s) => !reviewedSections[s.key]);
-      if (unreviewed)
+      if (unreviewed && unreviewed.key !== "billingSuggestion")
         return `Next: ${
           menuSections.find((s) => s.key === unreviewed.key).label
         }`;
@@ -112,29 +114,36 @@ export default function PatientEncounterPreviewOverlay({
 
   // Reset state when overlay closes
   const handleClose = () => {
-    setPreviewSection("transcript");
-    setReviewedSections({
-      transcript: false,
-      soapNote: false,
-      billingSuggestion: false,
-    });
+    setPreviewSection(menuSections[0]?.key || "transcript");
+    setReviewedSections(initialReviewed);
     onClose();
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Overlay background */}
-      <div className="absolute inset-0 bg-black opacity-50 pointer-events-none" />
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+       // Increase top margin here
+    >
+      {/* Overlay background, clickable to close */}
+      <div
+        className="absolute inset-0 bg-black opacity-50"
+        style={{ cursor: "pointer" }}
+        onClick={handleClose}
+      />
 
-      <div className="relative bg-white rounded-lg w-full max-w-6xl h-[90vh] flex flex-col">
+      <div
+        className="relative bg-white rounded-lg h-[85vh] flex flex-col"
+        style={{ width: "97vw", maxWidth: "2000px", marginTop: "7rem", marginBottom: "5rem" }}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-6">
-          <h2 className="text-2xl font-bold">Review Patient Encounter:</h2>
+          <h2 className="text-2xl font-bold">Review Changes:</h2>
           <button
             onClick={handleClose}
-            className="text-gray-500 hover:text-gray-700 text-2xl"
+            className="text-gray-500 hover:text-gray-700 text-5xl"
           >
             ×
           </button>
@@ -176,70 +185,73 @@ export default function PatientEncounterPreviewOverlay({
           {/* Left side - Content */}
           <div className="flex-1 p-6  h-full overflow-y-auto min-w-0">
             <div className="h-full">
-              {previewSection === "transcript" && (
-                <pre
-                  className="w-full whitespace-pre-wrap bg-gray-50 rounded-lg px-3 py-2 border text-gray-800 mb-10"
-                  style={{ minHeight: "10rem", fontFamily: "sans-serif" }}
-                >
-                  {transcript}
-                </pre>
-              )}
-              {previewSection === "soapNote" && (
-                <div className="flex flex-col gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Subjective
-                    </label>
-                    <pre
-                      className="w-full whitespace-pre-wrap bg-gray-50 rounded-lg px-3 py-2 border text-gray-800"
-                      style={{ minHeight: "4rem", fontFamily: "sans-serif" }}
-                    >
-                      {soapSubjective}
-                    </pre>
+              {previewSection === "transcript" &&
+                sections.includes("transcript") && (
+                  <pre
+                    className="w-full whitespace-pre-wrap bg-gray-50 rounded-lg px-3 py-2 border text-gray-800 mb-10"
+                    style={{ minHeight: "10rem", fontFamily: "sans-serif" }}
+                  >
+                    {transcript}
+                  </pre>
+                )}
+              {previewSection === "soapNote" &&
+                sections.includes("soapNote") && (
+                  <div className="flex flex-col gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Subjective
+                      </label>
+                      <pre
+                        className="w-full whitespace-pre-wrap bg-gray-50 rounded-lg px-3 py-2 border text-gray-800"
+                        style={{ minHeight: "4rem", fontFamily: "sans-serif" }}
+                      >
+                        {soapSubjective}
+                      </pre>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Objective
+                      </label>
+                      <pre
+                        className="w-full whitespace-pre-wrap bg-gray-50 rounded-lg px-3 py-2 border text-gray-800"
+                        style={{ minHeight: "4rem", fontFamily: "sans-serif" }}
+                      >
+                        {soapObjective}
+                      </pre>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Assessment
+                      </label>
+                      <pre
+                        className="w-full whitespace-pre-wrap bg-gray-50 rounded-lg px-3 py-2 border text-gray-800"
+                        style={{ minHeight: "4rem", fontFamily: "sans-serif" }}
+                      >
+                        {soapAssessment}
+                      </pre>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Plan
+                      </label>
+                      <pre
+                        className="w-full whitespace-pre-wrap bg-gray-50 rounded-lg px-3 py-2 border text-gray-800 mb-10"
+                        style={{ minHeight: "4rem", fontFamily: "sans-serif" }}
+                      >
+                        {soapPlan}
+                      </pre>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Objective
-                    </label>
-                    <pre
-                      className="w-full whitespace-pre-wrap bg-gray-50 rounded-lg px-3 py-2 border text-gray-800"
-                      style={{ minHeight: "4rem", fontFamily: "sans-serif" }}
-                    >
-                      {soapObjective}
-                    </pre>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Assessment
-                    </label>
-                    <pre
-                      className="w-full whitespace-pre-wrap bg-gray-50 rounded-lg px-3 py-2 border text-gray-800"
-                      style={{ minHeight: "4rem", fontFamily: "sans-serif" }}
-                    >
-                      {soapAssessment}
-                    </pre>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Plan
-                    </label>
-                    <pre
-                      className="w-full whitespace-pre-wrap bg-gray-50 rounded-lg px-3 py-2 border text-gray-800 mb-10"
-                      style={{ minHeight: "4rem", fontFamily: "sans-serif" }}
-                    >
-                      {soapPlan}
-                    </pre>
-                  </div>
-                </div>
-              )}
-              {previewSection === "billingSuggestion" && (
-                <pre
-                  className="w-full whitespace-pre-wrap bg-gray-50 rounded-lg px-3 py-2 border text-gray-800 mb-10"
-                  style={{ minHeight: "10rem", fontFamily: "sans-serif" }}
-                >
-                  {billingSuggestion}
-                </pre>
-              )}
+                )}
+              {previewSection === "billingSuggestion" &&
+                sections.includes("billingSuggestion") && (
+                  <pre
+                    className="w-full whitespace-pre-wrap bg-gray-50 rounded-lg px-3 py-2 border text-gray-800 mb-10"
+                    style={{ minHeight: "10rem", fontFamily: "sans-serif" }}
+                  >
+                    {billingSuggestion}
+                  </pre>
+                )}
 
               {/* Spacer for bottom padding */}
               <div className="h-0.5" />

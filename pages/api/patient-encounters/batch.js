@@ -16,7 +16,7 @@ export default async function handler(req, res) {
         // console.log('Fetched patientEncounters for user:', user.id, "with JWT:", req.headers.authorization);
         const { data, error } = await supabase //Only fetch SOAP notes for the authenticated user
             .from(patientEncounterTable)
-            .select('name')// Select all fields
+            .select('*')// Select all fields
             .eq('user_id', user.id)
             .order('created_at', { ascending: false });
         // console.log('Fetched patientEncounters:', data);

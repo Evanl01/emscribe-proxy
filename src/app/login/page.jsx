@@ -48,7 +48,7 @@ export default function LoginPage() {
         },
         "*"
       );
-      router.push("/new-patient-encounter");
+      router.push("/dashboard");
     } catch (err) {
       setError(err.message);
     } finally {

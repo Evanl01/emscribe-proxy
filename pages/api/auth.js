@@ -42,7 +42,7 @@ export default async function handler(req, res) {
             return res.status(200).json({ token: data?.session?.access_token || null });
         }
 
-        if (action === 'sign-out') {
+        if (action === 'sign-out') {// Only need req.body.action
             const { user, error: verifyError } = await authenticateRequest(req);
             if (verifyError) return res.status(401).json({ error: verifyError });
             const { error } = await supabase.auth.signOut();

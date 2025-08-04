@@ -814,6 +814,7 @@ export default function NewPatientEncounter() {
           soapNote_text: soapNoteText,
           patientEncounter: patientEncounter,
         }),
+        cache: "no-store", // Always fetch fresh data, never use cache
       });
       console.log("Save response:", response);
 
@@ -866,8 +867,8 @@ export default function NewPatientEncounter() {
   return (
     <>
       <Auth />
-      <div className="max-w-4xl mx-auto p-6">
-        <h1 className="text-3xl font-bold mb-8">New Recording</h1>
+      <div className="max-w-8xl mx-auto p-6">
+        <h1 className="text-3xl font-bold mb-8">New Patient Encounter</h1>
 
         {/* Section 1: Upload/Record */}
         <div className="border border-gray-200 rounded-lg mb-4">
@@ -878,7 +879,7 @@ export default function NewPatientEncounter() {
             }
           >
             <span className="text-lg font-semibold">
-              1. Upload or Record Audio
+              1. Upload or Record Patient Encounter Audio
             </span>
             <span className="text-xl">
               {activeSection === "upload" ? "−" : "+"}
@@ -890,7 +891,7 @@ export default function NewPatientEncounter() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Upload Section */}
                 <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Upload Recording</h3>
+                  <h3 className="text-lg font-medium">Upload Audio</h3>
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
                     <input
                       type="file"
@@ -1272,6 +1273,7 @@ export default function NewPatientEncounter() {
         onSave={saveTranscriptAndNote}
         isSaving={isSaving}
         errorMessage={errorMessage}
+        sections={["transcript", "soapNote", "billingSuggestion"]}
         // Optionally pass previewSection and reviewedSections if you want to control them from parent
       />
     </>
