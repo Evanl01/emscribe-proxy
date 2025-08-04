@@ -1,6 +1,6 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, Suspense } from "react";
 import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
@@ -9,7 +9,7 @@ import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPre
 import { set } from "zod";
 import no from "zod/v4/locales/no.cjs";
 
-export default function EditPatientEncounter() {
+function EditPatientEncounterInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const id = searchParams.get("id");
@@ -820,5 +820,14 @@ export default function EditPatientEncounter() {
         />
       )}
     </>
+  );
+}
+
+
+export default function EditPatientEncounter() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <EditPatientEncounterInner />
+    </Suspense>
   );
 }

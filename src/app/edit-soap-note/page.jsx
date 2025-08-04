@@ -1,13 +1,13 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, Suspense } from "react";
 import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
 import Auth from "@/src/utils/Auth.jsx";
 import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPreviewOverlay";
 
-export default function EditPatientEncounter() {
+function EditSoapNoteInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const soapNoteId = searchParams.get("id");
@@ -410,5 +410,14 @@ export default function EditPatientEncounter() {
         sections={["soapNote", "billingSuggestion"]}
       />
     </>
+  );
+}
+
+
+export default function EditSoapNote() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <EditSoapNoteInner />
+    </Suspense>
   );
 }
