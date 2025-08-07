@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { patientEncounterSchema } from '@/src/app/schemas/patientEncounter';
+import * as encryptionUtils from '@/src/utils/encryptionUtils';
 
 const patientEncounterTable = 'patientEncounters';
 
@@ -14,16 +15,26 @@ export default async function handler(req, res) {
             const id = req.query.id;
             if (!id) return res.status(400).json({ error: 'id is required' });
 
-            const { data: patientEncounter, error: patientEncounterError } = await supabase
+            const { data: patientEncounterData, error: patientEncounterError } = await supabase
                 .from(patientEncounterTable)
                 .select('*')
                 .eq('id', id)
-                .order('updated_at', { ascending: false });
+                .single();
 
             if (patientEncounterError) return res.status(500).json({ error: patientEncounterError.message });
+            if (!patientEncounterData.encrypted_aes_key || !patientEncounterData.iv) {
+                console.error('Missing encrypted AES key or IV for patient encounter:', id, ". Failed to decrypt data");
+                console.error('Patient Encounter Data:', patientEncounterData);
+                return res.status(400).json({ error: 'Missing encrypted AES key or IV' });
+            }
+            const aes_key = encryptionUtils.decryptAESKey(patientEncounterData.encrypted_aes_key);
+            if (patientEncounterData.encrypted_name) {
+                patientEncounterData.name = encryptionUtils.decryptText(patientEncounterData.encrypted_name, aes_key, patientEncounterData.iv);
+                delete patientEncounterData.encrypted_name;
+            }
 
 
-            return res.status(200).json({ success: true, data });
+            return res.status(200).json({ success: true, patientEncounterData });
         }
         catch (err) {
             return res.status(500).json({ error: err.message });

@@ -4,13 +4,13 @@ import React, { useState, useRef, useEffect, Suspense } from "react";
 import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
-import Auth from "@/src/utils/Auth.jsx";
 import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPreviewOverlay";
 
 function EditSoapNoteInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const soapNoteId = searchParams.get("id");
+  const soapNoteIdRaw = searchParams.get("id");
+  const soapNoteId = soapNoteIdRaw ? parseInt(soapNoteIdRaw, 10) : null;
 
   // State management
   const [patientEncounterId, setPatientEncounterId] = useState("");
@@ -39,37 +39,61 @@ function EditSoapNoteInner() {
     const fetchData = async () => {
       try {
         // 1. Fetch soapNote by id
-        const soapNoteRes = await fetch(`/api/soap-notes?id=${soapNoteId}`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${api.getJWT()}`,
-              "Content-Type": "application/json",
-            },
-            cache: "no-store",
-          }
-        );
+        const soapNoteRes = await fetch(`/api/soap-notes?id=${soapNoteId}`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${api.getJWT()}`,
+            "Content-Type": "application/json",
+          },
+          cache: "no-store",
+        });
         if (!soapNoteRes.ok) {
-          throw new Error(`Failed to fetch SOAP note: ${soapNoteRes.statusText}`);
+          throw new Error(
+            `Failed to fetch SOAP note: ${soapNoteRes.statusText}`
+          );
         }
-        const soapNoteObj = await soapNoteRes.json();
-        console.log("Fetched SOAP Note:", soapNoteObj);
-        if (!soapNoteObj) throw new Error("SOAP note not found");
+        const data = await soapNoteRes.json();
+        if (typeof data.soapNote_text === "string") {
+          let cleaned = data.soapNote_text
+            .replace(/^"+|"+$/g, "")
+            .replace(/""/g, '"')
+            .replace(/,(\s*[}\]])/g, "$1")
+            .replace(/[\u0000-\u001F\u007F-\u009F\u00A0]/g, " ");
+          // Attempt to fix nested colons (best effort, not perfect)
+          // .replace(/"(\w+)":"(\w+)":"([^"]*)"/g, '"$1_$2": "$3"');
+          try {
+            data.soapNote_text = JSON.parse(cleaned);
+          } catch (e) {
+            console.error("Failed to parse soapNote_text:", e, cleaned);
+            data.soapNote_text = {
+              error: "Invalid SOAP note format",
+              raw: cleaned,
+            };
+          }
+        }
+        if (!data) throw new Error("SOAP note not found");
 
         // 2. Set SOAP note fields
-        const soapNoteText = soapNoteObj.soapNote_text;
+        const soapNoteText = data.soapNote_text;
         setSoapSubjective(soapNoteText?.soapNote?.subjective || "");
         setSoapObjective(soapNoteText?.soapNote?.objective || "");
         setSoapAssessment(soapNoteText?.soapNote?.assessment || "");
         setSoapPlan(soapNoteText?.soapNote?.plan || "");
         let billingSuggestionObj = soapNoteText?.billingSuggestion || {};
-        let billingSuggestionText = format.cleanMarkdownText("", billingSuggestionObj, 0, "1.25em");
+        let billingSuggestionText = format.cleanMarkdownText(
+          "",
+          billingSuggestionObj,
+          0,
+          "1.25em"
+        );
         setBillingSuggestion(billingSuggestionText);
 
         // 3. Fetch patient encounter using soapNote.patientEncounter_id
-        const patientEncounterId = soapNoteObj.patientEncounter_id;
-        if (!patientEncounterId) throw new Error("Associated Patient Encounter not found");
-        const patientEncounterRes = await fetch(`/api/patient-encounters/complete?id=${patientEncounterId}`,
+        const patientEncounterId = data.patientEncounter_id;
+        if (!patientEncounterId)
+          throw new Error("Associated Patient Encounter not found");
+        const patientEncounterRes = await fetch(
+          `/api/patient-encounters/complete?id=${patientEncounterId}`,
           {
             headers: {
               Authorization: `Bearer ${api.getJWT()}`,
@@ -79,15 +103,18 @@ function EditSoapNoteInner() {
           }
         );
         if (!patientEncounterRes.ok) {
-          throw new Error(`Failed to fetch patient encounter: ${patientEncounterRes.statusText}`);
+          throw new Error(
+            `Failed to fetch patient encounter: ${patientEncounterRes.statusText}`
+          );
         }
         const patientEncounterDataRaw = await patientEncounterRes.json();
         const patientEncounterData = patientEncounterDataRaw.patientEncounter;
         setPatientEncounterName(patientEncounterData.name || "");
-
       } catch (error) {
         console.error("Error fetching SOAP note or patient encounter:", error);
-        setErrorMessage(`Failed to load SOAP note or patient encounter: ${error.message}`);
+        setErrorMessage(
+          `Failed to load SOAP note or patient encounter: ${error.message}`
+        );
         setPatientEncounterName("");
         setSoapSubjective("");
         setSoapObjective("");
@@ -162,9 +189,6 @@ function EditSoapNoteInner() {
   const saveSoapNote = async () => {
     setIsSaving(true);
     const missingFields = [];
-    if (!patientEncounterName.trim())
-      missingFields.push("Patient Encounter Name");
-    if (!transcript.trim()) missingFields.push("Transcript");
     if (!soapSubjective.trim()) missingFields.push("Subjective");
     if (!soapObjective.trim()) missingFields.push("Objective");
     if (!soapAssessment.trim()) missingFields.push("Assessment");
@@ -207,6 +231,10 @@ function EditSoapNoteInner() {
       const soapNoteText = JSON.stringify({
         soapNote: soapNoteObject,
         billingSuggestion: billingSuggestionObject,
+      });
+      console.log("Saving SOAP note:", {
+        soapNoteId,
+        soapNoteText,
       });
       const response = await fetch("/api/soap-notes", {
         method: "PATCH",
@@ -253,7 +281,6 @@ function EditSoapNoteInner() {
 
   return (
     <>
-      <Auth />
       <div className="max-w-8xl mx-auto p-6">
         <h1 className="text-3xl font-bold mb-8">Edit Soap Note</h1>
 
@@ -264,9 +291,7 @@ function EditSoapNoteInner() {
             onClick={() => {}}
             disabled={false}
           >
-            <span className="text-lg font-semibold">
-              1. Edit SOAP Note
-            </span>
+            <span className="text-lg font-semibold">1. Edit SOAP Note</span>
             <span className="text-xl">−</span>
           </button>
           <div className="p-6 border-t border-gray-200">
@@ -283,10 +308,10 @@ function EditSoapNoteInner() {
                   className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed"
                   style={{ minWidth: "12rem" }}
                 />
-                
               </div>
               <div className="mt-2 text-red-600 text-sm font-medium">
-                This field is view-only. To change, go to <a
+                This field is view-only. To change, go to{" "}
+                <a
                   href={`/edit-patient-encounter?id=${patientEncounterId}`}
                   className="text-blue-600 underline text-sm font-medium"
                   style={{ whiteSpace: "nowrap" }}
@@ -294,7 +319,8 @@ function EditSoapNoteInner() {
                   rel="noopener noreferrer"
                 >
                   Edit Patient Encounter
-                </a> page.
+                </a>{" "}
+                page.
               </div>
             </div>
 
@@ -408,11 +434,11 @@ function EditSoapNoteInner() {
         isSaving={isSaving}
         errorMessage={errorMessage}
         sections={["soapNote", "billingSuggestion"]}
+        isPatientEncounterNameEditable={false}
       />
     </>
   );
 }
-
 
 export default function EditSoapNote() {
   return (

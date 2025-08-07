@@ -39,18 +39,3 @@ WITH CHECK (
     SELECT id FROM public."patientEncounters" WHERE user_id = (SELECT auth.uid())
   )
 );
-
--- UPDATE policy
-DROP POLICY IF EXISTS "Users can update soapNotes (if they own FK patientEncounter_id)" ON public."soapNotes";
-
-CREATE POLICY "Users can update soapNotes (if they own FK patientEncounter_id)"
-ON public."soapNotes"
-AS PERMISSIVE
-FOR UPDATE
-TO authenticated
-WITH CHECK (
-  user_id = (SELECT auth.uid()) AND
-  "patientEncounter_id" IN (
-    SELECT id FROM public."patientEncounters" WHERE user_id = (SELECT auth.uid())
-  )
-);

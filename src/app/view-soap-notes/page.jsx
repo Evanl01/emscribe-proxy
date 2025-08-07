@@ -30,7 +30,29 @@ export default function ViewSoapNotes() {
           return;
         }
         const data = await response.json();
-        setSoapNotes(Object.values(data));
+        const parsedSoapNotes = Object.values(data).map((note) => {
+          if (typeof note.soapNote_text === "string") {
+            let cleaned = note.soapNote_text
+              .replace(/^"+|"+$/g, "")
+              .replace(/""/g, '"')
+              .replace(/,(\s*[}\]])/g, "$1")
+              .replace(/[\u0000-\u001F\u007F-\u009F\u00A0]/g, " ");
+            // Attempt to fix nested colons (best effort, not perfect)
+            // .replace(/"(\w+)":"(\w+)":"([^"]*)"/g, '"$1_$2": "$3"');
+            try {
+              note.soapNote_text = JSON.parse(cleaned);
+            } catch (e) {
+              console.error("Failed to parse soapNote_text:", e, cleaned);
+              note.soapNote_text = {
+                error: "Invalid SOAP note format",
+                raw: cleaned,
+              };
+            }
+          }
+          return note;
+        });
+        setSoapNotes(parsedSoapNotes);
+        console.log("Fetched SOAP notes:", parsedSoapNotes);
       } catch (error) {
         router.push("/login");
       }
@@ -60,7 +82,9 @@ export default function ViewSoapNotes() {
   return (
     <div className="max-w-8xl mx-auto p-8">
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold">View SOAP Notes ({soapNotes.length})</h1>
+        <h1 className="text-3xl font-bold">
+          View SOAP Notes ({soapNotes.length})
+        </h1>
         <div className="flex items-center gap-2">
           <label htmlFor="sortBy" className="text-sm font-medium text-gray-700">
             Sort By:
@@ -111,14 +135,12 @@ export default function ViewSoapNotes() {
                 cursor: "pointer",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.boxShadow =
-                  "0 4px 16px rgba(0,0,0,0.16)";
+                e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.16)";
                 e.currentTarget.style.transform =
                   "translateY(-4px) scale(1.03)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.boxShadow =
-                  "0 2px 8px rgba(0,0,0,0.08)";
+                e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.08)";
                 e.currentTarget.style.transform = "none";
               }}
               onClick={() => handleCardClick(soapNote.id)}
@@ -144,7 +166,10 @@ export default function ViewSoapNotes() {
                 }}
               >
                 {soapNote.soapNote_text?.soapNote?.subjective
-                  ? soapNote.soapNote_text.soapNote.subjective.substring(0, 200) + "..."
+                  ? soapNote.soapNote_text.soapNote.subjective.substring(
+                      0,
+                      200
+                    ) + "..."
                   : "No content"}
               </div>
             </div>

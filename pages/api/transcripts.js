@@ -1,11 +1,46 @@
 import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { transcriptSchema } from '@/src/app/schemas';
-import { filterUserIdFromReqBody } from '@/src/utils/filterUserIdFromReqBody';
-import { validateOwnership } from '@/src/utils/validateOwnership';
-import { filterForbiddenFields } from '@/src/utils/filterForbiddenFields';
+import * as encryptionUtils from '@/src/utils/encryptionUtils';
+import { record } from 'zod';
 
-const transcriptTableName = 'transcripts';
+const transcriptTable = 'transcripts';
+
+/**
+ * Encrypts transcript_text for a transcript object by:
+ * 1. Fetching the encrypted AES key via recording_id (using Supabase join).
+ * 2. Encrypting transcript_text and updating the transcript object.
+ * Returns { success, error, transcript }.
+ * @param {object} transcript - Transcript object containing transcript_text and recording_id.
+ */
+async function encryptTranscriptText(supabase, transcript) {
+    // 1. Get encrypted_aes_key by joining recording -> patientEncounter
+    const { data, error } = await supabase
+        .from('recordings')
+        .select(`
+            id,
+            patientEncounter:patientEncounter_id (
+                encrypted_aes_key
+            )
+        `)
+        .eq('id', transcript.recording_id)
+        .single();
+    // console.log('Fetched recording and patientEncounter for encryption:', data, error);
+    
+    if (error || !data || !data.patientEncounter?.encrypted_aes_key) {
+        return { success: false, error: 'Could not find recording or patient encounter for provided recording_id', transcript: null };
+    }
+    const encryptedAESKey = data.patientEncounter.encrypted_aes_key;
+
+    // 2. Encrypt transcript_text
+    const encryptionFieldResult = encryptionUtils.encryptField(transcript, 'transcript_text', encryptedAESKey);
+    if (!encryptionFieldResult.success) {
+        console.error('Failed to encrypt transcript_text:', encryptionFieldResult.error);
+        return { success: false, error: 'Failed to encrypt transcript_text', transcript: null };
+    }
+
+    return { success: true, error: null, transcript };
+}
 
 export default async function handler(req, res) {
     const supabase = getSupabaseClient(req.headers.authorization);
@@ -18,37 +53,74 @@ export default async function handler(req, res) {
         const id = req.query.id;
         if (!id) return res.status(400).json({ error: 'id is required' });
         const { data, error } = await supabase
-            .from(transcriptTableName)
-            .select('*')// Select all fields
+            .from(transcriptTable)
+            .select(`
+        *,
+        recording:recording_id (
+            id,
+            patientEncounter:patientEncounter_id (
+                encrypted_aes_key
+            )
+        )
+    `)
             .eq('id', id)
             .eq('user_id', user.id)
-            .order('updated_at', { ascending: false });
+            .single(); // Get a single record
         if (error) return res.status(500).json({ error: error.message });
+
+        if (!data || data.length === 0) {
+            return res.status(404).json({ error: 'Transcript not found' });
+        }
+        const decryptFieldsResult = await encryptionUtils.decryptField(data, 'transcript_text', data.recording?.patientEncounter?.encrypted_aes_key);
+        if (!decryptFieldsResult.success) {
+            console.error('Failed to decrypt transcript:', id, ". Error:", decryptFieldsResult.error);
+            return res.status(400).json({ error: decryptFieldsResult.error });
+        }
+        delete data.recording; // Clean up sensitive data
         return res.status(200).json(data);
     }
 
+
+
+
     // POST -------------------------------------------------------
     if (req.method === 'POST') {
-        const parseResult = transcriptSchema.safeParse(req.body);
+        const parseResult = transcriptSchema.partial().safeParse(req.body);
         if (!parseResult.success) {
             return res.status(400).json({ error: parseResult.error });
         }
         const transcript = parseResult.data;
+        // console.log('Creating transcript:', transcript);
         transcript.user_id = user.id; // Ensure user_id is set to the authenticated user's ID
-        if (!transcript.transcript_text) {
-            return res.status(400).json({ error: 'Transcript text is required' });
+        transcript.transcript_text = req.body.transcript_text;
+        if (!(req.body.transcript_text && transcript.recording_id)) {
+            return res.status(400).json({ error: 'transcript_text and recording_id are required' });
         }
-        // console.log('Transcript:', transcript);
-        const { data, error } = await supabase
-            .from(transcriptTableName)
-            .insert([transcript ])
+
+        // 1. Encrypt transcript_text
+        const encryptionResult = await encryptTranscriptText(supabase, transcript);
+        if (!encryptionResult.success) {
+            return res.status(400).json({ error: encryptionResult.error });
+        }
+        
+        console.log('Encrypted transcript:', transcript);
+        console.log('encryptionResult:', encryptionResult);
+
+        // 4. Insert encrypted transcript
+        const { data: insertData, error: insertError } = await supabase
+            .from(transcriptTable)
+            .insert([transcript])
             .select()
             .single();
-        if (error) return res.status(500).json({ error: error.message });
-        return res.status(201).json(data);
+        if (insertError) return res.status(500).json({ error: insertError.message });
+        return res.status(201).json(insertData);
     }
 
-    // PATCH -------------------------------------------------------
+
+
+
+
+    // PATCH -----------------------------------------------------------------------------------------
     if (req.method === 'PATCH') {
         const parseResult = transcriptSchema.partial().safeParse(req.body);
         if (!parseResult.success) {
@@ -56,17 +128,36 @@ export default async function handler(req, res) {
         }
 
         const transcript = parseResult.data;
-        if (!transcript.id) {
-            return res.status(400).json({ error: 'id is required for update' });
+        transcript.transcript_text = req.body.transcript_text; // Ensure transcript_text is set
+        if (!(transcript.id && transcript.transcript_text)) {
+            return res.status(400).json({ error: 'id and transcript_text are required for update' });
         }
         const { data, error } = await supabase
-            .from(transcriptTableName) // Only update based on transcript.id given, and if the user_id matches
-            .update(transcript)
+            .from(transcriptTable) // Only update based on transcript.id given, and if the user_id matches
+            .select('recording_id')
             .eq('id', transcript.id)
-            .select()
             .single();
         if (error) return res.status(500).json({ error: error.message });
-        return res.status(200).json(data);
+        
+        console.log('Decrypting: Fetched transcript to get recording_id:', data, error);
+        transcript.recording_id = data.recording_id;
+        const encryptionResult = await encryptTranscriptText(supabase, transcript);
+        if (!encryptionResult.success) {
+            return res.status(400).json({ error: encryptionResult.error });
+        }
+        delete transcript.recording_id; // No need to update recording_id
+        console.log('Encrypted transcript for update:', transcript);
+        console.log('encryptionResult for update:', encryptionResult);
+
+        const { data: updateData, error: updateError } = await supabase
+            .from(transcriptTable)
+            .update(transcript)
+            .eq('id', transcript.id)
+            .eq('user_id', user.id) // Ensure only the owner can update
+            .select()
+            .single();
+        if (updateError) return res.status(500).json({ error: updateError.message });
+        return res.status(200).json(updateData);
     }
 
 
@@ -74,9 +165,9 @@ export default async function handler(req, res) {
     if (req.method === 'DELETE') {
         const id = req.query.id;
         if (!id) return res.status(400).json({ error: 'Transcript ID is required' });
-        
+
         const { data, error } = await supabase
-            .from(transcriptTableName)
+            .from(transcriptTable)
             .delete()
             .eq('id', id)
             .select()

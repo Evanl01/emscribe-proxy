@@ -20,3 +20,26 @@ with check (
     user_id IS NOT NULL
 );
 
+CREATE POLICY "Users can insert recordings (if they own FK patientEncounter_id)"
+ON public."recordings"
+AS PERMISSIVE
+FOR INSERT
+TO authenticated
+WITH CHECK (
+  user_id = auth.uid() AND
+  "patientEncounter_id" IN (
+    SELECT id FROM public."patientEncounters" WHERE user_id = auth.uid()
+  )
+);
+
+CREATE POLICY "Users can update recordings (if they own FK patientEncounter_id)"
+ON public."recordings"
+AS PERMISSIVE
+FOR UPDATE
+TO authenticated
+WITH CHECK (
+  user_id = auth.uid() AND
+  "patientEncounter_id" IN (
+    SELECT id FROM public."patientEncounters" WHERE user_id = auth.uid()
+  )
+);

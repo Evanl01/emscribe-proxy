@@ -5,7 +5,6 @@ import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
 import * as validation from "@/public/scripts/validation.js";
-import Auth from "@/src/utils/Auth.jsx";
 
 const Dashboard = () => {
   const router = useRouter();
@@ -120,7 +119,7 @@ const Dashboard = () => {
 
       return data;
     } catch (error) {
-        router.push("/login");
+      router.push("/login");
 
       // if (error && error.status === 401) {
       //   alert("Token expired. Please log in again.");
@@ -168,14 +167,34 @@ const Dashboard = () => {
       }
 
       const data = await response.json();
-      console.log("Fetched Soap Notes:", data);
+      const parsedSoapNotes = Object.values(data).map((note) => {
+        if (typeof note.soapNote_text === "string") {
+          let cleaned = note.soapNote_text
+            .replace(/^"+|"+$/g, "")
+            .replace(/""/g, '"')
+            .replace(/,(\s*[}\]])/g, "$1")
+            .replace(/[\u0000-\u001F\u007F-\u009F\u00A0]/g, " ")
+            // Attempt to fix nested colons (best effort, not perfect)
+            // .replace(/"(\w+)":"(\w+)":"([^"]*)"/g, '"$1_$2": "$3"');
+          try {
+            note.soapNote_text = JSON.parse(cleaned);
+          } catch (e) {
+            console.error("Failed to parse soapNote_text:", e, cleaned);
+            note.soapNote_text = {
+              error: "Invalid SOAP note format",
+              raw: cleaned,
+            };
+          }
+        }
+        return note;
+      });
 
       // Set the full data for stats
-      setSoapNotes(data);
-      setSoapNotesCount(Object.keys(data).length);
+      setSoapNotes(parsedSoapNotes);
+      setSoapNotesCount(Object.keys(parsedSoapNotes).length);
 
       // Get recent items (last 5)
-      const recent = Object.values(data).slice(0, 5);
+      const recent = Object.values(parsedSoapNotes).slice(0, 5);
       setRecentSoapNotes(recent);
 
       return data;
@@ -255,6 +274,9 @@ const Dashboard = () => {
           <div>Dot Phrases: {Object.keys(dotPhrases).length}</div>
           <div>Patient Encounters: {Object.keys(patientEncounters).length}</div>
         </div> */}
+        <h1 className="text-3xl font-bold mb-10">
+          Dashboard
+        </h1>
 
         <div
           className="tabs"

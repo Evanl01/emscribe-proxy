@@ -8,5 +8,6 @@ export const transcriptSchema = z.object({
   updated_at: z.string().regex(isoDatetimeRegex, 'Invalid ISO datetime').default(() => new Date().toISOString()).optional(),
   user_id: z.string().regex(uuidRegex, 'Invalid UUID').optional(),
   recording_id: z.number().int().optional(),
-  transcript_text: z.string().nullable(),
+  encrypted_transcript_text: z.string().nullable(),
+  iv: z.string().nullable().optional(),
 });

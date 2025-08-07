@@ -22,6 +22,7 @@ export default function PatientEncounterPreviewOverlay({
   isSaving,
   errorMessage,
   sections = ["transcript", "soapNote", "billingSuggestion"], // default to all
+  isPatientEncounterNameEditable=true,
 }) {
   const [previewSection, setPreviewSection] = useState(sections[0]);
 
@@ -270,7 +271,7 @@ export default function PatientEncounterPreviewOverlay({
                 onChange={(e) => setPatientEncounterName(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 placeholder="Enter patient encounter name"
-                disabled={isSaving}
+                disabled={isSaving || !isPatientEncounterNameEditable}
               />
             </div>
 

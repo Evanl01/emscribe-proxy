@@ -5,9 +5,59 @@ import formidable from 'formidable';
 import fs from 'fs';
 import th from 'zod/v4/locales/th.cjs';
 import { json, record } from 'zod';
+import * as encryptionUtils from '@/src/utils/encryptionUtils';
 
 const patientEncounterTable = 'patientEncounters';
 const soapNoteTable = 'soapNotes';
+const recordingTable = 'recordings';
+const transcriptTable = 'transcripts';
+
+async function decryptJsonResponse(jsonResponse, encryptedAESKey) {
+    const encryptionConfig = {
+        patientEncounter: ['name'],
+        transcript: ['transcript_text'],
+        soapNote: ['soapNote_text'],
+    };
+    // Check if the jsonResponse has the expected structure
+    if (!jsonResponse || typeof jsonResponse !== 'object') {
+        throw new Error('Invalid JSON response structure');
+    }
+
+    if (!(jsonResponse.patientEncounter && jsonResponse.transcript && Array.isArray(jsonResponse.soapNotes))) {
+        throw new Error('Missing required fields in JSON response: patientEncounter, transcript, and soapNotes (Array)');
+    }
+
+    for (const key of Object.keys(encryptionConfig)) {
+        const target = jsonResponse[key];
+        let result = null;
+        if (Array.isArray(target)) {
+            // For arrays (e.g., soapNotes)
+            for (const item of target) {
+                for (const field of encryptionConfig[key]) {
+                    result = await encryptionUtils.decryptField(
+                        item,
+                        field,
+                        encryptedAESKey,
+                    );
+                }
+            }
+        } else if (target) {
+            // For single objects
+            for (const field of encryptionConfig[key]) {
+                result = await encryptionUtils.decryptField(
+                    target,
+                    field,
+                    encryptedAESKey,
+                );
+            }
+        }
+
+        if (!result.success) {
+            throw new Error(`Decryption failed for field ${field} in ${key}: ${result.error}`);
+        }
+    }
+}
+
 
 export default async function handler(req, res) {
     const supabase = getSupabaseClient(req.headers.authorization);
@@ -15,144 +65,299 @@ export default async function handler(req, res) {
     if (authError) return res.status(401).json({ error: authError });
 
     if (req.method == 'GET') {
-        const id = req.query.id;
-        if (!id) return res.status(400).json({ error: 'id is required' });
-        console.log(patientEncounterTable, user.id);
-        const { data, error: patientEncounterError, count } = await supabase
-            .from(patientEncounterTable)
-            .select('*')
-            .eq('user_id', user.id)
-            .eq('id', id)
-            .single();
+        try {
 
-        let patientEncounterData = data;
-        if (patientEncounterError) return res.status(500).json({ error: patientEncounterError.message });
-        console.log('Fetched Patient Encounter: id: ', patientEncounterData.id, ", recording_file_path:", patientEncounterData.recording_file_path);
+            const patientEncounter_id = parseInt(req.query.id);
+            // console.log('Parsed patientEncounter_id:', patientEncounter_id, 'Type:', typeof patientEncounter_id);
 
-        if (!patientEncounterData || !patientEncounterData.id) {
-            return res.status(404).json({ error: 'Patient Encounter not found for id:' + id });
-        }
-
-        // Create signed URLs for audio files
-        const needNewSignedUrl = !patientEncounterData.recording_file_signed_url || new Date(patientEncounterData.recording_file_signed_url_expiry) < new Date();
-        if (patientEncounterData.recording_file_path && needNewSignedUrl) {
-            const expirySeconds = 60 * 60; // 1 hour
-
-            // console.log('Creating signed URL for recording file:', patientEncounterData.recording_file_path);
-            patientEncounterData.recording_file_path = patientEncounterData.recording_file_path.replace(/^audio-files\//, '');
-            const { data: signedUrlData, error: signedUrlError } = await supabase
-                .storage
-                .from('audio-files')
-                .createSignedUrl(patientEncounterData.recording_file_path, expirySeconds); // 1 hour expiry
-            if (signedUrlError) {
-                console.error('Error creating signed URL:', signedUrlError.message);
-                return res.status(500).json({ error: signedUrlError.message });
+            if (!patientEncounter_id || isNaN(patientEncounter_id)) {
+                console.error('Invalid patientEncounter ID:', req.query.id);
+                return res.status(400).json({ error: 'Valid Patient Encounter ID is required' });
             }
-            console.log('Created signed URL for recording file:', signedUrlData);
-            // Update signed URL and expiry in patientEncounter in supabase
-            const now = new Date();
-            const expiresAt = new Date(now.getTime() + expirySeconds * 1000).toISOString();
-            const { data: updateData, error: updateError } = await supabase
+
+            // Step 0: Fetching patient encounter
+            console.log('Step 0: Fetching patient encounter with id:', patientEncounter_id, 'user_id:', user.id);
+            const { data: patientEncounterData, error: patientEncounterError } = await supabase
                 .from(patientEncounterTable)
-                .update({
-                    recording_file_signed_url: signedUrlData.signedUrl,
-                    recording_file_signed_url_expiry: expiresAt,
-                })
-                .eq('id', patientEncounterData.id)
-                .select()
+                .select('*')
+                .eq('id', patientEncounter_id)
                 .single();
-            if (updateError) {
-                console.error('Error updating Patient Encounter with recording file signed URL:', updateError.message);
-                return res.status(500).json({ error: updateError.message });
+
+            if (patientEncounterError) {
+                console.error('Patient Encounter query error:', patientEncounterError);
+                return res.status(500).json({ error: 'Database error: ' + patientEncounterError.message });
             }
-            patientEncounterData = updateData;
+            const aes_key = encryptionUtils.decryptAESKey(patientEncounterData.encrypted_aes_key);
+            const decryptPatientEncounterResult = await encryptionUtils.decryptField(patientEncounterData, 'name', patientEncounterData.encrypted_aes_key);
+            if (!decryptPatientEncounterResult.success) {
+                return res.status(400).json({ error: decryptPatientEncounterResult.error });
+            }
+
+
+            // patientEncounter.name = await encryptionUtils.decryptAES(patientEncounterData.name, encrypted_aes_key, iv);
+
+            console.log('Step 1: Fetching recording linked to patientEncounter_id:', patientEncounter_id);
+            const { data: recordingData, error: recordingError } = await supabase
+                .from(recordingTable)
+                .select('*')
+                .eq('patientEncounter_id', patientEncounter_id)
+                .single();
+
+            delete recordingData.iv;
+            if (recordingError) {
+                console.error('Recording query error:', recordingError);
+                return res.status(500).json({ error: 'Database error: ' + recordingError.message });
+            }
+
+
+            // Step 2: Fetch transcript
+            console.log('Step 2: Fetching transcript for recording_id:', recordingData.id);
+            const { data: transcriptData, error: transcriptError } = await supabase
+                .from(transcriptTable)
+                .select('*')
+                .eq('recording_id', recordingData.id)
+                .single();
+            if (transcriptError) {
+                console.error('Transcript query error:', transcriptError);
+                return res.status(500).json({ error: 'Database error: ' + transcriptError.message });
+            }
+            let decryptedTranscriptResult = await encryptionUtils.decryptField(transcriptData, 'transcript_text', aes_key);
+            if (!decryptedTranscriptResult.success) {
+                return res.status(400).json({ error: decryptedTranscriptResult.error });
+            }
+
+            // Use first transcript
+
+            // Step 3: Fetch SOAP notes
+            console.log('Step 3: Fetching SOAP notes for patientEncounter_id:', patientEncounter_id);
+            const { data: soapNotes, error: soapError } = await supabase
+                .from('soapNotes')
+                .select('*')
+                .eq('patientEncounter_id', patientEncounter_id);
+            if (soapError) {
+                console.error('SOAP notes query error:', soapError);
+                return res.status(500).json({ error: 'Database error: ' + soapError.message });
+            }
+
+            // Decrypt SOAP notes
+            for (let i = 0; i < soapNotes.length; i++) {
+                let soapNote = soapNotes[i];
+                if (!soapNote.iv) {
+                    console.error('Missing IV for SOAP note:', soapNote.id, ". Failed to decrypt data");
+                    return res.status(400).json({ error: 'Missing IV for SOAP note' });
+                }
+                let decryptSoapNoteResult = await encryptionUtils.decryptField(soapNote, 'soapNote_text', aes_key);
+                if (!decryptSoapNoteResult.success) {
+                    console.error('Failed to decrypt SOAP note:', soapNote.id, ". Error:", decryptSoapNoteResult.error);
+                    return res.status(400).json({ error: decryptSoapNoteResult.error });
+                }
+            }
+            //Step 4: Decrypt all encrypted fields
+
+            // Step 4: Generate signed URL for audio file
+            const needNewSignedUrl = !patientEncounterData.recording_file_signed_url || new Date(patientEncounterData.recording_file_signed_url_expiry) < new Date();
+            console.log('Step 4: Generating signed URL for audio file');
+            if (recordingData.recording_file_path && needNewSignedUrl) {
+                // Remove 'audio-files/' prefix if present
+                if (recordingData.recording_file_path.startsWith('audio-files/')) {
+                    recordingData.recording_file_path = recordingData.recording_file_path.replace(/^audio-files\//, '');
+                }
+                console.log('Created signed URL for recording file:', recordingData.recording_file_path);
+                // Update signed URL and expiry in patientEncounter in supabase
+                const expirySeconds = 60 * 60;
+
+                const { data: signedUrlData, error: signedError } = await supabase.storage
+                    .from('audio-files')
+                    .createSignedUrl(recordingData.recording_file_path, expirySeconds);
+                if (signedError) {
+                    console.error('Signed URL error:', signedError);
+                    return res.status(500).json({ error: 'Failed to create signed URL: ' + signedError.message });
+                }
+
+                const now = new Date();
+                const expiresAt = new Date(now.getTime() + expirySeconds * 1000).toISOString();
+
+                recordingData.recording_file_signed_url = signedUrlData.signedUrl;
+                recordingData.recording_file_signed_url_expiry = expiresAt;
+                // Update signed URL and expiry in patientEncounter in supabase
+                const { data: updateData, error: updateError } = await supabase
+                    .from(recordingTable)
+                    .update({
+                        recording_file_signed_url: recordingData.recording_file_signed_url,
+                        recording_file_signed_url_expiry: recordingData.recording_file_signed_url_expiry
+                    })
+                    .eq('id', recordingData.id)
+                    .select()
+                    .single();
+                if (updateError) {
+                    console.error('Error updating Recording\'s file signed URL:', updateError.message);
+                    return res.status(500).json({ error: updateError.message });
+                }
+
+            }
+
+            // Step 5: Prepare final response
+            const patient_encounter = {
+                patientEncounter: patientEncounterData,
+                recording: recordingData,
+                transcript: transcriptData,
+                soapNotes: soapNotes,
+            };
+
+            console.log('=== Final Response ===');
+            console.log('Patient encounter prepared:', patient_encounter);
+
+            return res.status(200).json(patient_encounter);
+
+        } catch (err) {
+            console.error('=== CATCH BLOCK ===');
+            console.error('Caught error:', err);
+            console.error('Error message:', err.message);
+            console.error('Error stack:', err.stack);
+            return res.status(500).json({ error: 'Internal server error: ' + err.message });
         }
-
-
-        // Fetch related SOAP Notes
-        const { data: soapNotes, error: soapNoteError } = await supabase
-            .from(soapNoteTable)
-            .select('*')
-            .eq('patientEncounter_id', patientEncounterData.id)
-            .order('created_at', { ascending: false });
-        if (soapNoteError) return res.status(500).json({ error: soapNoteError.message });
-        patientEncounterData.soapNotes = soapNotes;
-
-        // console.log('Fetched Patient Encounter with SOAP Notes:', patientEncounter);
-
-        return res.status(200).json({ patientEncounter: patientEncounterData });
     }
-
-
-
+    /*
+    *
+    *
+    *
+    *
+    *
+    *
+    *
+    *
+    *
+    *
+    *
+    */
 
 
     // POST /api/patient-encounters/complete----------------------------------------------------------------------------------------------
     else if (req.method == 'POST') {
+        console.log('req.body:', req.body);
+        // 1. Validate input
         const patientEncounterParseResult = patientEncounterSchema.safeParse(req.body.patientEncounter);
         if (!patientEncounterParseResult.success) {
             console.error('Patient Encounter validation error:', patientEncounterParseResult.error);
             return res.status(400).json({ error: patientEncounterParseResult.error });
         }
         const patientEncounter = patientEncounterParseResult.data;
-        patientEncounter.user_id = user.id; // Ensure user_id is set to the authenticated user's ID
-        let soapNoteData = null, soapNoteError = null, patientEncounterData = null, patientEncounterError = null;
+        patientEncounter.user_id = user.id;
+
+        // 2. Generate AES key and IV for patientEncounter
+        const { aesKey, iv: encounterIV } = encryptionUtils.generateAESKeyAndIV();
+        patientEncounter.iv = encounterIV;
+        patientEncounter.encrypted_aes_key = encryptionUtils.encryptAESKey(aesKey);
+
+        // 3. Encrypt patientEncounter fields and preprocess
+        console.log('Patient Encounter to encrypt:', patientEncounter, "And name:", req.body.patientEncounter.name);
+        if (req.body.patientEncounter.name) {
+            patientEncounter.encrypted_name = encryptionUtils.encryptText(req.body.patientEncounter.name, aesKey, encounterIV);
+        }
+
+        let transcriptData = null, transcriptError = null;
+        let recordingData = null, recordingError = null;
+        let soapNoteData = null, soapNoteError = null;
+        let patientEncounterData = null, patientEncounterError = null;
+
         try {
-            console.log('Creating Patient Encounter:', patientEncounter);
+            console.log('Saving Patient Encounter: ', patientEncounter);
+            // 4. Save patientEncounter
             ({ data: patientEncounterData, error: patientEncounterError } = await supabase
                 .from(patientEncounterTable)
                 .insert([patientEncounter])
                 .select()
                 .single());
             if (patientEncounterError) throw new Error('Failed to create Patient Encounter: ' + patientEncounterError.message);
-            // console.log('Patient Encounter created:', patientEncounterData);
 
-            let soapNote_textObject = req.body.soapNote_text.trim();
-            console.log('SOAP Note text:', soapNote_textObject);
-            try {
-                soapNote_textObject = JSON.parse(soapNote_textObject);
-            }
-            catch (e) {
-                throw new Error('Invalid JSON format for soapNote_text');
+
+            // 5. Encrypt and save recording
+            const recordingIV = encryptionUtils.generateRandomIVBase64();
+            const recordingObj = {
+                ...req.body.recording,
+                iv: recordingIV,
+                patientEncounter_id: patientEncounterData.id,
+                user_id: user.id,
+            };
+            delete recordingObj.recording_text; // If you have a plaintext field
+            console.log('Recording object to insert:', recordingObj);
+            ({ data: recordingData, error: recordingError } = await supabase
+                .from(recordingTable)
+                .insert([recordingObj])
+                .select()
+                .single());
+            if (recordingError) throw new Error('Failed to create Recording: ' + recordingError.message);
+
+
+            // 6. Encrypt and save transcript
+            const transcriptIV = encryptionUtils.generateRandomIVBase64();
+            const transcriptObj = {
+                ...req.body.transcript,
+                iv: transcriptIV,
+                encrypted_transcript_text: req.body.transcript.transcript_text
+                    ? encryptionUtils.encryptText(req.body.transcript.transcript_text, aesKey, transcriptIV)
+                    : null,
+                recording_id: recordingData.id,
+                user_id: user.id,
+            };
+            delete transcriptObj.transcript_text;
+
+            ({ data: transcriptData, error: transcriptError } = await supabase
+                .from(transcriptTable)
+                .insert([transcriptObj])
+                .select()
+                .single());
+            if (transcriptError) throw new Error('Failed to create Transcript: ' + transcriptError.message);
+
+            // 7. Encrypt and save SOAP Note
+            const soapNoteIV = encryptionUtils.generateRandomIVBase64();
+            let soapNote_textObject = req.body.soapNote_text;
+            if (typeof soapNote_textObject === "string") {
+                try {
+                    soapNote_textObject = JSON.parse(soapNote_textObject);
+                } catch (e) {
+                    throw new Error('Invalid JSON format for soapNote_text');
+                }
             }
             const soapNoteObject = {
-                soapNote_text: soapNote_textObject,
-                patientEncounter_id: patientEncounterData.id, // Link SOAP Note to Patient Encounter
+                iv: soapNoteIV,
+                encrypted_soapNote_text: soapNote_textObject
+                    ? encryptionUtils.encryptText(JSON.stringify(soapNote_textObject), aesKey, soapNoteIV)
+                    : null,
+                patientEncounter_id: patientEncounterData.id,
+                user_id: user.id,
             };
-            console.log('Parsed SOAP Note:', soapNoteObject);
-            const soapNoteParseResult = soapNoteSchema.safeParse(soapNoteObject);
-            if (!soapNoteParseResult.success) {
-                // console.error('SOAP Note validation error:', soapNoteParseResult.error);
-                throw new Error('Invalid SOAP Note format');
-            }
-            const soapNote = soapNoteParseResult.data;
-            soapNote.user_id = user.id;
+            delete soapNoteObject.soapNote_text;
 
-            ({ soapNoteData, soapNoteError } = await supabase
+            ({ data: soapNoteData, error: soapNoteError } = await supabase
                 .from(soapNoteTable)
-                .insert([soapNote])
+                .insert([soapNoteObject])
                 .select()
                 .single());
             if (soapNoteError) throw new Error('Failed to create SOAP Note: ' + soapNoteError.message);
+
             return res.status(200).json({
                 patientEncounter: patientEncounterData,
+                transcript: transcriptData,
+                recording: recordingData,
                 soapNote: soapNoteData
             });
 
-        }
-        catch (err) {
-            // Rollback all previous steps. Start from soapNotes, which FK references transcript, which FK references recording
-            if (soapNoteData && soapNoteData.id) {
-                await supabase.from('soapNotes').delete().eq('id', soapNoteData.id);
-            }
+        } catch (err) {
+            // ACID rollback: delete patientEncounter (cascade deletes linked records), then check other tables
             if (patientEncounterData && patientEncounterData.id) {
-                await supabase.from('patientEncounters').delete().eq('id', patientEncounterData.id);
+                await supabase.from(patientEncounterTable).delete().eq('id', patientEncounterData.id);
             }
-            // Skip file deletion, let users retry saving in frontend.
-            // if( audio_file_path){
-            //     audio_file_path = audio_file_path.replace(/^audio-files\//, '');
-            //     await supabase.storage.from('audio-files').remove([audio_file_path]);
-            // }
+            // Double-check: delete transcript, recording, soapNote if cascade fails
+            if (transcriptData && transcriptData.id) {
+                await supabase.from(transcriptTable).delete().eq('id', transcriptData.id);
+            }
+            if (recordingData && recordingData.id) {
+                await supabase.from(recordingTable).delete().eq('id', recordingData.id);
+            }
+            if (soapNoteData && soapNoteData.id) {
+                await supabase.from(soapNoteTable).delete().eq('id', soapNoteData.id);
+            }
             console.error('API error:', err);
             if (err.stack) {
                 console.error('Stack trace:', err.stack);

@@ -6,9 +6,8 @@ import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
 import * as validation from "@/public/scripts/validation.js";
 import { createClient } from "@supabase/supabase-js";
-// import * as auth  from "@/src/utils/Auth.jsx";
-import Auth from "@/src/utils/Auth.jsx";
 import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPreviewOverlay";
+import { set } from "zod";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -592,7 +591,13 @@ export default function NewPatientEncounter() {
       });
 
       if (!response.ok) {
+        setIsProcessing(false);
+        
         let errorMessage = `Server error: ${response.status} ${response.statusText}`;
+        setCurrentStatus({
+          status: "error",
+          message: errorMessage,
+        });
         try {
           const errorData = await response.text();
           if (errorData) {
@@ -794,25 +799,23 @@ export default function NewPatientEncounter() {
         billingSuggestion: billingSuggestionObject,
       });
 
-      const patientEncounter = {
-        name: patientEncounterName,
-        recording_file_path: recording_file_path,
-        transcript_text: transcript,
-      };
-
       console.log("Saving patient encounter with data:", {
-        patientEncounter,
-        soapNoteText,
+        patientEncounter: { name: patientEncounterName },
+        recording: { recording_file_path: recording_file_path },
+        transcript: { transcript_text: transcript },
+        soapNote_text: soapNoteText,
       });
       const response = await fetch("/api/patient-encounters/complete", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${api.getJWT()}`,
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          patientEncounter: { name: patientEncounterName },
+          recording: { recording_file_path: recording_file_path },
+          transcript: { transcript_text: transcript },
           soapNote_text: soapNoteText,
-          patientEncounter: patientEncounter,
         }),
         cache: "no-store", // Always fetch fresh data, never use cache
       });
@@ -866,7 +869,6 @@ export default function NewPatientEncounter() {
 
   return (
     <>
-      <Auth />
       <div className="max-w-8xl mx-auto p-6">
         <h1 className="text-3xl font-bold mb-8">New Patient Encounter</h1>
 
@@ -987,10 +989,10 @@ export default function NewPatientEncounter() {
                           return "";
                         })()}
                       >
-                        {recordingFile.name} (
-                        {(recordingFile.size / (1024 * 1024)).toFixed(1)}MB)
+                        {recordingFile?.name || ""} (
+                        {(recordingFile?.size / (1024 * 1024)).toFixed(1)}MB)
                         {recordingDuration > 0 &&
-                          ` - ${formatDuration(recordingDuration)}`}
+                          ` - ${formatDuration(recordingDuration)}` || "0MB"}
                       </p>
 
                       {/* Audio Player Controls - Hidden during upload */}

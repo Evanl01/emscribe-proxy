@@ -1,5 +1,3 @@
-import { property } from "zod";
-
 const SchemaType = {
     OBJECT: "object",
     STRING: "string"
@@ -11,7 +9,7 @@ export function getTranscriptReqBody(base64Audio) {
             {
                 parts: [
                     {
-                        text: "Create transcription of this medical patient visit"
+                        text: "Create transcription of this medical patient visit. For readability, Add '\n' breaks every 2-3 minutes where appropriate, or if sections becomes too long."
                     },
                     {
                         inline_data: {
@@ -69,7 +67,7 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                                     allergies: { type: SchemaType.STRING, description: "Known allergies" }
                                 },
                                 required: ["chief complaint", "hpi", "history", "ros", "medications", "allergies"],
-                                property: ["chief complaint", "hpi", "history", "ros", "medications", "allergies"],
+                                propertyOrdering: ["chief complaint", "hpi", "history", "ros", "medications", "allergies"],
                             },
                             objective: {
                                 type: SchemaType.OBJECT,

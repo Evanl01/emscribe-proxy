@@ -5,7 +5,6 @@ import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
 import * as validation from "@/public/scripts/validation.js";
-import Auth from "@/src/utils/Auth.jsx";
 
 const EmScribeUtils = {
   ...api,
@@ -154,7 +153,6 @@ const ViewTranscripts = () => {
 
   return (
     <>
-      <Auth />
       <div className="transcripts-container">
         <header className="page-header">
           <div className="header-content">

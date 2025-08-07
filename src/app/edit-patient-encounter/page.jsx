@@ -4,7 +4,6 @@ import React, { useState, useRef, useEffect, Suspense } from "react";
 import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
-import Auth from "@/src/utils/Auth.jsx";
 import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPreviewOverlay";
 import { set } from "zod";
 import no from "zod/v4/locales/no.cjs";
@@ -92,33 +91,31 @@ function EditPatientEncounterInner() {
           );
         }
         const data = await response.json();
-        const patientEncounterData = data.patientEncounter;
 
         console.log("Fetched patient encounter data:", data);
         // Fill in all fields from API response
-        setPatientEncounterId(patientEncounterData.id || null);
-        setPatientEncounterName(patientEncounterData.name || "");
-        setTranscript(patientEncounterData.transcript_text || "");
-        setRecordingFileUrl(
-          patientEncounterData.recording_file_signed_url || ""
-        );
-        setRecordingFileName(
-          patientEncounterData.recording_file_name || "audio"
-        );
-        setRecordingFileSize(patientEncounterData.recording_file_size || 0);
-        setRecordingDuration(patientEncounterData.recording_duration || 0);
+        setPatientEncounterId(data.patientEncounter.id || null);
+        setPatientEncounterName(data.patientEncounter.name || "");
+        setTranscript(data.transcript.transcript_text || "");
+        setRecordingFileUrl(data.recording.recording_file_signed_url || "");
+        // setRecordingFileName(
+        //   patientEncounterData.recording.recording_file_name || "audio"
+        // );
+        // setRecordingFileSize(patientEncounterData.recording.recording_file_size || 0);
+        // setRecordingDuration(patientEncounterData.recording.recording_duration || 0);
 
         // Parse soapNote_text if present
-        if (patientEncounterData.soapNotes) {
-          setAssociatedSoapNotes(patientEncounterData.soapNotes);
+        if (data.soapNotes) {
+          const parsedSoapNotes = format.parseSoapNotes(data.soapNotes);
+          setAssociatedSoapNotes(parsedSoapNotes);
         }
       } catch (error) {
         console.error("Error fetching patient encounter data:", error);
         setErrorMessage(`Failed to load patient encounter: ${error.message}`);
         setRecordingFileUrl("");
-        setRecordingFileName("");
-        setRecordingFileSize(0);
-        setRecordingDuration(0);
+        // setRecordingFileName("");
+        // setRecordingFileSize(0);
+        // setRecordingDuration(0);
         setAudioLoaded(false);
         setAudioCurrentTime(0);
         setAudioDuration(0);
@@ -296,7 +293,6 @@ function EditPatientEncounterInner() {
         ? addMatch[1].trim().replace(/\r?\n/g, "\n")
         : "";
 
-
       const response = await fetch("/api/soap-notes", {
         method: "PATCH",
         headers: {
@@ -305,8 +301,10 @@ function EditPatientEncounterInner() {
         },
         body: JSON.stringify({
           id: id,
-          soapNote_text: { soapNote: soapNoteObject, billingSuggestion: billingSuggestionObject },
-          
+          soapNote_text: {
+            soapNote: soapNoteObject,
+            billingSuggestion: billingSuggestionObject,
+          },
         }),
         cache: "no-store",
       });
@@ -769,7 +767,9 @@ function EditPatientEncounterInner() {
               <div className="p-6 border-t border-gray-200">
                 <div className="flex flex-col items-end">
                   <button
-                    onClick={() => setShowPreview({ type: "soapNoteBillingSuggestion" })}
+                    onClick={() =>
+                      setShowPreview({ type: "soapNoteBillingSuggestion" })
+                    }
                     disabled={isSaving}
                     className={`bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-medium ${
                       isSaving ? "opacity-50 cursor-not-allowed" : ""
@@ -822,7 +822,6 @@ function EditPatientEncounterInner() {
     </>
   );
 }
-
 
 export default function EditPatientEncounter() {
   return (

@@ -1,9 +1,7 @@
 import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { soapNoteSchema } from '@/src/app/schemas';
-import { filterUserIdFromReqBody } from '@/src/utils/filterUserIdFromReqBody';
-import { validateOwnership } from '@/src/utils/validateOwnership';
-import { filterForbiddenFields } from '@/src/utils/filterForbiddenFields';
+import { decryptField, encryptionUtils } from '@/src/utils/encryptionUtils';
 
 const soapNoteTableName = 'soapNotes';
 
@@ -18,13 +16,28 @@ export default async function handler(req, res) {
   // GET: ------------------------------------------------------------------------------
   if (req.method === 'GET') {
     // Get all SOAP notes
-
-    const { data, error } = await supabase //Only fetch SOAP notes for the authenticated user
-      .from(soapNoteTableName)
-      .select('*')// Select all fields
+    const { data, error } = await supabase
+      .from('soapNotes')
+      .select(`
+    *,
+    patientEncounter:patientEncounter_id (
+      encrypted_aes_key
+    )
+  `)
       .eq('user_id', user.id)
       .order('updated_at', { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
+
+    for (let soapNote of data) {
+      // Use the joined patientEncounter field from the query
+      const encryptedAESKey = soapNote.patientEncounter?.encrypted_aes_key || null;
+
+      let decryptFieldResult = await decryptField(soapNote, 'soapNote_text', encryptedAESKey);
+      if (!decryptFieldResult.success) {
+        console.error('Failed to decrypt SOAP note:', soapNote.id, ". Error:", decryptFieldResult.error);
+        return res.status(400).json({ error: decryptFieldResult.error });
+      }
+      delete soapNote.patientEncounter; // Clean up the joined field
+    }
     return res.status(200).json(data);
   }
   res.status(405).json({ error: 'Method not allowed' });

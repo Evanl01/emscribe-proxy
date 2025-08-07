@@ -1,0 +1,259 @@
+import crypto from "crypto";
+
+/**
+ * Decrypts a field in an object using AES key and IV, with error checking and logging.
+ * Returns an object: { success, error, value }
+ * @param {object} obj - The object containing encrypted data.
+ * @param {string} field - The base field name (e.g., "name", "transcript_text").
+ * @param {string|Buffer} encryptedAESKey - The RSA-encrypted AES key (base64 or Buffer).
+ */
+export async function decryptField(obj, field, encryptedAESKey) {
+    // console.log('[decryptField]:', obj, field, encryptedAESKey);
+    const encryptedField = `encrypted_${field}`;
+    if (!encryptedAESKey || !obj.iv) {
+        const errorMsg = `Missing encrypted AES key or IV for ${field}. Failed to decrypt data`;
+        console.error(errorMsg);
+        return { success: false, error: errorMsg, value: null };
+    }
+
+    let aesKey;
+    try {
+      if( typeof encryptedAESKey === 'string' ) {
+        aesKey = decryptAESKey(encryptedAESKey);
+      } else if (Buffer.isBuffer(encryptedAESKey)) {
+        aesKey = encryptedAESKey;
+      } else {
+        throw new TypeError('decryptField: "encryptedAESKey" must be a base64 string or Buffer');
+      }
+    } catch (err) {
+        console.error(`[decryptField] Error decrypting AES key for ${field}:`, err);
+        return { success: false, error: 'Failed to decrypt AES key', value: null };
+    }
+
+    if (!obj[encryptedField]) {
+        const errorMsg = `Missing encrypted field ${encryptedField} for ${field}`;
+        console.error(errorMsg);
+        return { success: false, error: errorMsg, value: null };
+    }
+
+    try {
+        obj[field] = decryptText(obj[encryptedField], aesKey, obj.iv);
+        delete obj[encryptedField];
+        delete obj.iv;
+        delete obj.encrypted_aes_key;
+        return { success: true, error: null, value: obj[field] };
+    } catch (err) {
+        console.error(`[decryptField] Error decrypting ${encryptedField}:`, err);
+        obj[field] = null;
+        return { success: false, error: 'Failed to decrypt field', value: null };
+    }
+}
+
+/**
+ * Encrypts a field in an object using an encrypted AES key.
+ * Generates a new IV for encryption.
+ * Removes the plain field after encryption.
+ * Returns the encrypted value and generated IV.
+ * @param {object} obj - The object containing the plain text field.
+ * @param {string} field - The base field name (e.g., "transcript_text", "soapNote_text").
+ * @param {string} encryptedAesKey - The RSA-encrypted AES key (base64 string).
+ * @returns {object} { success, error, value, iv }
+ */
+export function encryptField(obj, field, encryptedAesKey) {
+    // console.log('[encryptField]:', obj, field, encryptedAesKey);
+    try {
+        // Decrypt the AES key first
+        const aesKey = decryptAESKey(encryptedAesKey);
+        const aesKeyBase64 = Buffer.isBuffer(aesKey) ? aesKey.toString('base64') : aesKey;
+
+        // Generate a new IV
+        const ivBase64 = generateRandomIVBase64();
+
+        if (!obj[field]) {
+            const errorMsg = `Missing plain field ${field} for encryption`;
+            console.error(errorMsg);
+            return { success: false, error: errorMsg, value: null, iv: null };
+        }
+
+        obj[`encrypted_${field}`] = encryptText(obj[field], aesKeyBase64, ivBase64);
+        obj.iv = ivBase64;
+        delete obj[field];
+        return { success: true, error: null, value: obj[`encrypted_${field}`], iv: ivBase64 };
+    } catch (err) {
+        console.error(`[encryptField] Error encrypting ${field}:`, err);
+        return { success: false, error: 'Failed to encrypt field', value: null, iv: null };
+    }
+}
+
+
+export function generateRandomIVBase64() {
+  // Node.js
+  if (typeof window === "undefined" && (typeof globalThis.crypto === "undefined" || !globalThis.crypto.getRandomValues)) {
+    return crypto.randomBytes(16).toString("base64");
+  }
+  // Browser/Edge
+  else if (typeof globalThis.crypto?.getRandomValues === "function") {
+    const ivArray = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(ivArray);
+    return Buffer.from(ivArray).toString("base64");
+  }
+  throw new Error("No secure random generator available in this environment.");
+}
+
+/**
+ * Generates a random AES key and IV for encryption, compatible with Node.js and browser/edge environments.
+ * @returns {{ aesKey: string, iv: string }}
+ */
+export function generateAESKeyAndIV() {
+  let aesKey, iv;
+
+  // Node.js environment
+  if (typeof window === "undefined" && (typeof globalThis.crypto === "undefined" || !globalThis.crypto.getRandomValues)) {
+    aesKey = crypto.randomBytes(32);
+    iv = crypto.randomBytes(16);
+  }
+  // Browser/Edge environment
+  else if (typeof globalThis.crypto?.getRandomValues === "function") {
+    const aesKeyArray = new Uint8Array(32);
+    const ivArray = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(aesKeyArray);
+    globalThis.crypto.getRandomValues(ivArray);
+    aesKey = Buffer.from(aesKeyArray);
+    iv = Buffer.from(ivArray);
+  } else {
+    throw new Error("No secure random generator available in this environment.");
+  }
+
+  return {
+    aesKey: aesKey.toString("base64"),
+    iv: iv.toString("base64"),
+  };
+}
+
+/**
+ * Encrypts text using a provided AES key and IV, then encrypts the AES key using an RSA public key.
+ * @param {string} plainText - The text to encrypt.
+ * @param {string} aesKey - The AES key (base64).
+ * @param {string} iv - The initialization vector (base64).
+ * @returns {string} Encrypted text as a base64 string.
+ */
+export function encryptText(plainText, aesKey, iv) {
+  // Only support Node.js for AES encryption
+  if (typeof window !== "undefined" || typeof crypto.createCipheriv !== "function") {
+    throw new Error("AES encryption is only supported in Node.js for this function.");
+  }
+
+  try {
+    const aesKeyBuf = Buffer.from(aesKey, "base64");
+    const ivBuf = Buffer.from(iv, "base64");
+    const cipher = crypto.createCipheriv("aes-256-cbc", aesKeyBuf, ivBuf);
+    let encryptedText = cipher.update(plainText, "utf8", "base64");
+    encryptedText += cipher.final("base64");
+    return encryptedText;
+  } catch (err) {
+    console.error('[encryptText] Error:', err);
+    throw err;
+  }
+}
+
+/**
+ * Decrypts AES-encrypted text using the provided IV and decrypted AES key.
+ * @param {string} encryptedText - The AES-encrypted text (base64).
+ * @param {Buffer|string} aesKey - The decrypted AES key (Buffer or base64 string).
+ * @param {string} iv - The initialization vector (base64).
+ * @returns {string} Decrypted plain text.
+ */
+export function decryptText(encryptedText, aesKey, iv) {
+  let aesKeyPrintable;
+  if (Buffer.isBuffer(aesKey)) {
+    aesKeyPrintable = aesKey.toString('base64');
+  } else if (typeof aesKey === 'string') {
+    aesKeyPrintable = aesKey;
+  } else {
+    aesKeyPrintable = String(aesKey);
+  }
+  const base64Key = 'slhv8jSpVrvzO2hyNYdxcNGBGqE6ISvsCl4VJaX7wYY=';
+  const rawKeyBuffer = Buffer.from(base64Key, 'base64');
+  // console.log('decryptText():    ', { encryptedText: encryptedText.substring(0, 20) + "......", aesKey: aesKeyPrintable, iv });
+  // console.log('Raw aes key (hex):', rawKeyBuffer.toString('hex'));
+  // console.log('Raw key (bytes):', Array.from(rawKeyBuffer));   // For byte array input
+  // console.log('Raw key length:', rawKeyBuffer.length);          // Should be 32 for AES-256
+
+  if (typeof window !== "undefined" || typeof crypto.createDecipheriv !== "function") {
+    throw new Error("AES decryption is only supported in Node.js for this function.");
+  }
+
+  if (!encryptedText || (typeof encryptedText !== "string" && !Buffer.isBuffer(encryptedText))) {
+    throw new TypeError('decryptText: "encryptedText" must be a non-empty string or Buffer');
+  }
+
+  try {
+    const aesKeyBuf = Buffer.isBuffer(aesKey) ? aesKey : Buffer.from(aesKey, "base64");
+    const decipher = crypto.createDecipheriv(
+      "aes-256-cbc",
+      aesKeyBuf,
+      Buffer.from(iv, "base64")
+    );
+    let decrypted = decipher.update(encryptedText, "base64", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
+  } catch (err) {
+    console.error('[decryptText] Error:', err);
+    throw err;
+  }
+}
+/**
+ * Encrypts an AES key using the RSA public key from environment variables.
+ * @param {Buffer|string} aesKey - The AES key to encrypt (Buffer or base64 string).
+ * @returns {string} Encrypted AES key as a base64 string.
+ */
+export function encryptAESKey(aesKey) {
+  if (typeof window !== "undefined" || typeof crypto.publicEncrypt !== "function") {
+    throw new Error("RSA encryption is only supported in Node.js for this function.");
+  }
+
+  try {
+    const publicKey = process.env.RSA_PUBLIC_KEY.replace(/\\n/g, '\n');
+    const aesKeyBuf = Buffer.isBuffer(aesKey) ? aesKey : Buffer.from(aesKey, "base64");
+    return crypto.publicEncrypt(
+      {
+        key: publicKey,
+        padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+        oaepHash: "sha256",
+      },
+      aesKeyBuf
+    ).toString("base64");
+  } catch (err) {
+    console.error('[encryptAESKey] Error:', err);
+    throw err;
+  }
+}
+
+/**
+ * Decrypts an AES key using the RSA private key from environment variables.
+ * @param {string} encryptedAESKey - The RSA-encrypted AES key (base64).
+ * @returns {Buffer} Decrypted AES key as a Buffer.
+ */
+export function decryptAESKey(encryptedAESKey) {
+  if (!encryptedAESKey) {
+    throw new Error('[decryptAESKey] Missing encryptedAESKey!');
+  }
+  if (typeof window !== "undefined" || typeof crypto.privateDecrypt !== "function") {
+    throw new Error("RSA decryption is only supported in Node.js for this function.");
+  }
+
+  try {
+    const privateKey = process.env.RSA_PRIVATE_KEY.replace(/\\n/g, '\n');
+    return crypto.privateDecrypt(
+      {
+        key: privateKey,
+        padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+        oaepHash: "sha256",
+      },
+      Buffer.from(encryptedAESKey, "base64")
+    );
+  } catch (err) {
+    console.error('[decryptAESKey] Error:', err);
+    throw err;
+  }
+}
