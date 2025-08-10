@@ -30,27 +30,7 @@ export default function ViewSoapNotes() {
           return;
         }
         const data = await response.json();
-        const parsedSoapNotes = Object.values(data).map((note) => {
-          if (typeof note.soapNote_text === "string") {
-            let cleaned = note.soapNote_text
-              .replace(/^"+|"+$/g, "")
-              .replace(/""/g, '"')
-              .replace(/,(\s*[}\]])/g, "$1")
-              .replace(/[\u0000-\u001F\u007F-\u009F\u00A0]/g, " ");
-            // Attempt to fix nested colons (best effort, not perfect)
-            // .replace(/"(\w+)":"(\w+)":"([^"]*)"/g, '"$1_$2": "$3"');
-            try {
-              note.soapNote_text = JSON.parse(cleaned);
-            } catch (e) {
-              console.error("Failed to parse soapNote_text:", e, cleaned);
-              note.soapNote_text = {
-                error: "Invalid SOAP note format",
-                raw: cleaned,
-              };
-            }
-          }
-          return note;
-        });
+        const parsedSoapNotes = format.parseSoapNotes(data);
         setSoapNotes(parsedSoapNotes);
         console.log("Fetched SOAP notes:", parsedSoapNotes);
       } catch (error) {
@@ -120,7 +100,7 @@ export default function ViewSoapNotes() {
           sortedSoapNotes.map((soapNote) => (
             <div
               className="soap-card"
-              data-soapNote-id={soapNote.id}
+              data-soapnote-id={soapNote.id}
               key={soapNote.id}
               style={{
                 background: "#fff",

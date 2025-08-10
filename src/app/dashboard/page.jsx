@@ -151,7 +151,7 @@ const Dashboard = () => {
       });
 
       if (!response.ok) {
-        let errorMsg = "Failed to fetch patient encounters";
+        let errorMsg = "Failed to fetch soap notes";
         let errorStatus = response.status;
         try {
           const errorData = await response.json();
@@ -167,27 +167,8 @@ const Dashboard = () => {
       }
 
       const data = await response.json();
-      const parsedSoapNotes = Object.values(data).map((note) => {
-        if (typeof note.soapNote_text === "string") {
-          let cleaned = note.soapNote_text
-            .replace(/^"+|"+$/g, "")
-            .replace(/""/g, '"')
-            .replace(/,(\s*[}\]])/g, "$1")
-            .replace(/[\u0000-\u001F\u007F-\u009F\u00A0]/g, " ")
-            // Attempt to fix nested colons (best effort, not perfect)
-            // .replace(/"(\w+)":"(\w+)":"([^"]*)"/g, '"$1_$2": "$3"');
-          try {
-            note.soapNote_text = JSON.parse(cleaned);
-          } catch (e) {
-            console.error("Failed to parse soapNote_text:", e, cleaned);
-            note.soapNote_text = {
-              error: "Invalid SOAP note format",
-              raw: cleaned,
-            };
-          }
-        }
-        return note;
-      });
+      const parsedSoapNotes = format.parseSoapNotes(data);
+      console.log("Fetched soapNotes:", parsedSoapNotes);
 
       // Set the full data for stats
       setSoapNotes(parsedSoapNotes);
@@ -201,10 +182,12 @@ const Dashboard = () => {
     } catch (error) {
       if (error && error.status === 401) {
         alert("Token expired. Please log in again.");
+        router.push("/login");
+        return;
       } else {
-        alert("Error fetching patient encounters: " + (error.message || error));
+        alert("Error fetching soap notes: " + (error.message || error));
+        router.push("/login");
       }
-      router.push("/login");
     }
   };
 
@@ -274,9 +257,7 @@ const Dashboard = () => {
           <div>Dot Phrases: {Object.keys(dotPhrases).length}</div>
           <div>Patient Encounters: {Object.keys(patientEncounters).length}</div>
         </div> */}
-        <h1 className="text-3xl font-bold mb-10">
-          Dashboard
-        </h1>
+        <h1 className="text-3xl font-bold mb-10">Dashboard</h1>
 
         <div
           className="tabs"
@@ -673,72 +654,6 @@ const Dashboard = () => {
             Export
           </button>
         </div> */}
-
-        {/* Settings Modal */}
-        {settingsModalOpen && (
-          <div id="settingsModal" className="modal" style={{ display: "flex" }}>
-            <div className="modal-content">
-              <h2>Settings</h2>
-              <label>
-                Whisper API Key:{" "}
-                <input
-                  id="whisperApiKey"
-                  type="text"
-                  value={settings.apiKeys.whisper || ""}
-                  onChange={(e) =>
-                    setSettings((s) => ({
-                      ...s,
-                      apiKeys: { ...s.apiKeys, whisper: e.target.value },
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Gemini API Key:{" "}
-                <input
-                  id="geminiApiKey"
-                  type="text"
-                  value={settings.apiKeys.gemini || ""}
-                  onChange={(e) =>
-                    setSettings((s) => ({
-                      ...s,
-                      apiKeys: { ...s.apiKeys, gemini: e.target.value },
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Default Template:{" "}
-                <input
-                  id="defaultTemplate"
-                  type="text"
-                  value={settings.defaultTemplate || ""}
-                  onChange={(e) =>
-                    setSettings((s) => ({
-                      ...s,
-                      defaultTemplate: e.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <div className="modal-actions">
-                <button id="saveSettingsBtn" onClick={saveSettings}>
-                  Save
-                </button>
-                <button id="closeSettingsBtn" onClick={closeSettingsModal}>
-                  Close
-                </button>
-                <button
-                  id="testConnectionBtn"
-                  onClick={testConnections}
-                  disabled={testBtnState.disabled}
-                >
-                  {testBtnState.text}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </>
   );

@@ -59,28 +59,28 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                                 type: SchemaType.OBJECT,
                                 description: "Subjective findings - what the patient reports (symptoms, concerns, history)",
                                 properties: {
-                                    "chief complaint": { type: SchemaType.STRING, description: "Chief complaint of the patient" },
-                                    hpi: { type: SchemaType.STRING, description: "History of Present Illness" },
-                                    history: { type: SchemaType.STRING, description: "Past medical, surgical, family, and social history" },
-                                    ros: { type: SchemaType.STRING, description: "Review of Systems" },
-                                    medications: { type: SchemaType.STRING, description: "Current medications" },
-                                    allergies: { type: SchemaType.STRING, description: "Known allergies" }
+                                    "Chief complaint": { type: SchemaType.STRING, description: "Chief complaint of the patient" },
+                                    HPI: { type: SchemaType.STRING, description: "History of Present Illness" },
+                                    History: { type: SchemaType.STRING, description: "Past medical, surgical, family, and social history" },
+                                    ROS: { type: SchemaType.STRING, description: "Review of Systems" },
+                                    Medications: { type: SchemaType.STRING, description: "Current medications" },
+                                    Allergies: { type: SchemaType.STRING, description: "Known allergies" }
                                 },
-                                required: ["chief complaint", "hpi", "history", "ros", "medications", "allergies"],
-                                propertyOrdering: ["chief complaint", "hpi", "history", "ros", "medications", "allergies"],
+                                required: ["Chief complaint", "HPI", "History", "ROS", "Medications", "Allergies"],
+                                propertyOrdering: ["Chief complaint", "HPI", "History", "ROS", "Medications", "Allergies"],
                             },
                             objective: {
                                 type: SchemaType.OBJECT,
                                 description: "Objective clinical observations - measurable/observable findings (vitals, physical exam, lab results)",
                                 properties: {
-                                    heent: { type: SchemaType.STRING, description: "HEENT (Head, Eyes, Ears, Nose, Throat) exam findings" },
-                                    general: { type: SchemaType.STRING, description: "General exam findings" },
-                                    cardiovascular: { type: SchemaType.STRING, description: "Cardiovascular exam findings" },
-                                    musculoskeletal: { type: SchemaType.STRING, description: "Musculoskeletal exam findings" },
-                                    other: { type: SchemaType.STRING, description: "Other objective findings" }
+                                    HEENT: { type: SchemaType.STRING, description: "HEENT (Head, Eyes, Ears, Nose, Throat) exam findings" },
+                                    General: { type: SchemaType.STRING, description: "General exam findings" },
+                                    Cardiovascular: { type: SchemaType.STRING, description: "Cardiovascular exam findings" },
+                                    Musculoskeletal: { type: SchemaType.STRING, description: "Musculoskeletal exam findings" },
+                                    Other: { type: SchemaType.STRING, description: "Other objective findings" }
                                 },
-                                required: ["heent", "general", "cardiovascular", "musculoskeletal", "other"],
-                                propertyOrdering: ["heent", "general", "cardiovascular", "musculoskeletal", "other"]
+                                required: ["HEENT", "General", "Cardiovascular", "Musculoskeletal", "Other"],
+                                propertyOrdering: ["HEENT", "General", "Cardiovascular", "Musculoskeletal", "Other"]
                             },
                             assessment: {
                                 type: SchemaType.STRING,
@@ -99,12 +99,12 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                         type: SchemaType.OBJECT,
                         description: "Billing suggestions (CPT, ICD-10) for the encounter",
                         properties: {
-                            icd10: { type: SchemaType.STRING, description: "ICD-10 codes for the diagnosis. Max 4, can have additional supporting codes" },
-                            cpt: { type: SchemaType.STRING, description: "CPT codes for the services provided, with justification. Also note if new/established patient, etc." },
-                            additional_inquiries: { type: SchemaType.STRING, description: "Additional patient inquiries to pursue to increase billing level" }
+                            ICD10: { type: SchemaType.STRING, description: "ICD-10 codes for the diagnosis. Max 4, can have additional supporting codes" },
+                            CPT: { type: SchemaType.STRING, description: "CPT codes for the services provided, with justification. Billing code for new (99202–99205) / established (99211–99215) patient." },
+                            "Additional inquiries": { type: SchemaType.STRING, description: "Additional patient inquiries to pursue to increase doctor's billing level" }
                         },
-                        required: ["icd10", "cpt", "additional_inquiries"],
-                        propertyOrdering: ["icd10", "cpt", "additional_inquiries"]
+                        required: ["ICD10", "CPT", "Additional inquiries"],
+                        propertyOrdering: ["ICD10", "CPT", "Additional inquiries"]
                     }
                 },
                 required: ["soapNote", "billingSuggestion"]

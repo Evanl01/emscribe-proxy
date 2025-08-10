@@ -2,6 +2,7 @@ import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { soapNoteSchema } from '@/src/app/schemas';
 import * as encryptionUtils from '@/src/utils/encryptionUtils';
+import * as format from '@/public/scripts/format';
 
 const soapNoteTable = 'soapNotes';
 const patientEncounterTable = 'patientEncounters';
@@ -71,6 +72,15 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: decryptResult.error });
     }
     delete data.patientEncounter; // Clean up joined field
+    console.log('Decrypted SOAP Note:', data); 
+    try {
+      data.soapNote_text = format.parseSoapNotes(data.soapNote_text);
+      console.log('Parsed SOAP Note text:', data.soapNote_text);
+      // data.soapNote_text = JSON.parse(data.soapNote_text);
+    } catch (parseErr) {
+      console.error("Decryption succeeded but JSON parse of SOAP Note failed:", parseErr);
+      return res.status(400).json({ error: 'Failed to parse SOAP Note text' });
+    }
     return res.status(200).json(data);
   }
 

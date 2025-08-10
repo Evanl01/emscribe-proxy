@@ -6,6 +6,7 @@ import fs from 'fs';
 import th from 'zod/v4/locales/th.cjs';
 import { json, record } from 'zod';
 import * as encryptionUtils from '@/src/utils/encryptionUtils';
+import * as format from '@/public/scripts/format';
 
 const patientEncounterTable = 'patientEncounters';
 const soapNoteTable = 'soapNotes';
@@ -103,11 +104,11 @@ export default async function handler(req, res) {
                 .eq('patientEncounter_id', patientEncounter_id)
                 .single();
 
-            delete recordingData.iv;
             if (recordingError) {
                 console.error('Recording query error:', recordingError);
                 return res.status(500).json({ error: 'Database error: ' + recordingError.message });
             }
+            delete recordingData.iv;
 
 
             // Step 2: Fetch transcript
@@ -150,6 +151,13 @@ export default async function handler(req, res) {
                 if (!decryptSoapNoteResult.success) {
                     console.error('Failed to decrypt SOAP note:', soapNote.id, ". Error:", decryptSoapNoteResult.error);
                     return res.status(400).json({ error: decryptSoapNoteResult.error });
+                }
+                
+                try {
+                    soapNote.soapNote_text = JSON.parse(soapNote.soapNote_text);
+                } catch (parseErr) {
+                    console.error("Decryption succeeded but JSON parse of SOAP Note failed:", parseErr);
+                    return null;
                 }
             }
             //Step 4: Decrypt all encrypted fields
@@ -234,7 +242,10 @@ export default async function handler(req, res) {
 
     // POST /api/patient-encounters/complete----------------------------------------------------------------------------------------------
     else if (req.method == 'POST') {
-        console.log('req.body:', req.body);
+        if (!(req.body.patientEncounter && req.body.recording && req.body.transcript && req.body.soapNote_text)) {
+            console.error('Missing required fields in request body: patientEncounter, recording, transcript, soapNote_text');
+            return res.status(400).json({ error: 'Missing required fields in request body: patientEncounter, recording, transcript, soapNote_text' });
+        }
         // 1. Validate input
         const patientEncounterParseResult = patientEncounterSchema.safeParse(req.body.patientEncounter);
         if (!patientEncounterParseResult.success) {
@@ -319,6 +330,7 @@ export default async function handler(req, res) {
                     throw new Error('Invalid JSON format for soapNote_text');
                 }
             }
+            console.log('SOAP Note text object to encrypt:', soapNote_textObject);
             const soapNoteObject = {
                 iv: soapNoteIV,
                 encrypted_soapNote_text: soapNote_textObject
@@ -369,25 +381,25 @@ export default async function handler(req, res) {
         }
     }
 
-    if (req.method === 'PATCH') {
-        const parseResult = patientEncounterSchema.partial().safeParse(req.body);
-        if (!parseResult.success) {
-            return res.status(400).json({ error: parseResult.error });
-        }
-        const patientEncounter = parseResult.data;
-        if (!patientEncounter.id) {
-            return res.status(400).json({ error: 'id is required' });
-        }
+    // if (req.method === 'PATCH') {
+    //     const parseResult = patientEncounterSchema.partial().safeParse(req.body);
+    //     if (!parseResult.success) {
+    //         return res.status(400).json({ error: parseResult.error });
+    //     }
+    //     const patientEncounter = parseResult.data;
+    //     if (!patientEncounter.id) {
+    //         return res.status(400).json({ error: 'id is required' });
+    //     }
 
 
-        const { data, error } = await supabase
-            .from(patientEncounterTable)
-            .update(patientEncounter)
-            .eq('id', patientEncounter.id)
-            .select();
-        if (error) return res.status(500).json({ error: error.message });
-        return res.status(200).json(data);
-    }
+    //     const { data, error } = await supabase
+    //         .from(patientEncounterTable)
+    //         .update(patientEncounter)
+    //         .eq('id', patientEncounter.id)
+    //         .select();
+    //     if (error) return res.status(500).json({ error: error.message });
+    //     return res.status(200).json(data);
+    // }
 
     return res.status(405).json({ error: 'Method not allowed' });
 }

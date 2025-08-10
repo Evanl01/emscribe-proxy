@@ -7,6 +7,7 @@ import * as format from "@/public/scripts/format.js";
 import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPreviewOverlay";
 import { set } from "zod";
 import no from "zod/v4/locales/no.cjs";
+import ExportDataAsFileMenu from "@/src/components/ExportDataAsFileMenu.jsx";
 
 function EditPatientEncounterInner() {
   const router = useRouter();
@@ -34,6 +35,8 @@ function EditPatientEncounterInner() {
   const audioPlayerRef = useRef(null);
   const [selectedSoapNoteId, setSelectedSoapNoteId] = useState(null);
   const [sortBy, setSortBy] = useState("created_at");
+  const [previewPatientEncounterName, setPreviewPatientEncounterName] =
+    useState(patientEncounterName);
 
   const [isSaving, setIsSaving] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -370,9 +373,18 @@ function EditPatientEncounterInner() {
   return (
     <>
       <div className="max-w-8xl mx-auto p-6">
-        <h1 className="text-3xl font-bold mb-8">
-          Edit Patient Encounter : {patientEncounterName}
-        </h1>
+        {/* Title row with Export button on right */}
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-3xl font-bold">
+            Edit Patient Encounter: {patientEncounterName}
+          </h1>
+          <ExportDataAsFileMenu
+            patientEncounterData={{ name: patientEncounterName }}
+            transcriptData={{ transcript_text: transcript }}
+            soapNotesData={associatedSoapNotes}
+            billingSuggestionData={billingSuggestion}
+          />
+        </div>
 
         {/* Section 1: Patient Encounter Recording (Accordion) */}
         <div className="border border-gray-200 rounded-lg mb-4">
@@ -511,20 +523,30 @@ function EditPatientEncounterInner() {
                 />
               </div>
               <div className="flex flex-col items-end">
-                <button
-                  onClick={() => setShowPreview({ type: "transcript" })}
-                  disabled={isSaving}
-                  className={`bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-medium ${
-                    isSaving ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
-                >
-                  Preview Transcript
-                </button>
-                {errorMessage && (
-                  <div className="mt-3 text-red-600 text-sm text-right w-full">
-                    {errorMessage}
-                  </div>
-                )}
+                <div className="flex gap-4">
+                  {/* Export menu/button - placed to the left of Preview button */}
+                  {/* <ExportDataAsFileMenu
+                    patientEncounterData={{ name: patientEncounterName }}
+                    transcriptData={{ transcript_text: transcript }}
+                    soapNotesData={associatedSoapNotes}
+                    billingSuggestionData={billingSuggestion}
+                  /> */}
+
+                  <button
+                    onClick={() => setShowPreview({ type: "transcript" })}
+                    disabled={isSaving}
+                    className={`bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-medium ${
+                      isSaving ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                  >
+                    Preview Transcript
+                  </button>
+                  {errorMessage && (
+                    <div className="mt-3 text-red-600 text-sm text-right w-full">
+                      {errorMessage}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -789,8 +811,8 @@ function EditPatientEncounterInner() {
           onClose={() => setShowPreview(false)}
           transcript={transcript}
           setTranscript={setTranscript}
-          patientEncounterName={patientEncounterName}
-          setPatientEncounterName={setPatientEncounterName}
+          patientEncounterName={previewPatientEncounterName}
+          setPatientEncounterName={setPreviewPatientEncounterName}
           onSave={() => savePatientEncounter(patientEncounterId)}
           isSaving={isSaving}
           errorMessage={errorMessage}
@@ -811,12 +833,13 @@ function EditPatientEncounterInner() {
           setSoapPlan={setSoapPlan}
           billingSuggestion={billingSuggestion}
           setBillingSuggestion={setBillingSuggestion}
-          patientEncounterName={patientEncounterName}
-          setPatientEncounterName={setPatientEncounterName}
+          patientEncounterName={previewPatientEncounterName}
+          setPatientEncounterName={setPreviewPatientEncounterName}
           onSave={() => saveDocument(selectedSoapNoteId)}
           isSaving={isSaving}
           errorMessage={errorMessage}
           sections={["soapNote", "billingSuggestion"]}
+          isPatientEncounterNameEditable={false}
         />
       )}
     </>

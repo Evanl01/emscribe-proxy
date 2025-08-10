@@ -1,3 +1,20 @@
+// Print a JSON object as indented plain text (for display, logging, or export)
+export function printJsonObject(obj, level = 0) {
+    const indent = (lvl) => ' '.repeat(lvl * 3);
+    if (typeof obj === 'string' || typeof obj === 'number') {
+        return indent(level) + String(obj);
+    } else if (Array.isArray(obj)) {
+        return obj.map(item => printJsonObject(item, level + 1)).join('\n');
+    } else if (typeof obj === 'object' && obj !== null) {
+        let result = '';
+        for (const [key, value] of Object.entries(obj)) {
+            result += indent(level) + key + ':\n';
+            result += printJsonObject(value, level + 1) + '\n';
+        }
+        return result.trim();
+    }
+    return indent(level) + String(obj);
+}
 // Clean markdown for plain text display, removing all HTML/markdown and adding indentation for levels
 export const cleanMarkdownText = (key, value, level = 0) => {
     // Helper for indentation
@@ -178,6 +195,7 @@ export const formatMarkdownText = (key, value, level = 0, fontSize = null) => {
 export function parseSoapNotes(input) {
   // Helper to parse and clean a single note
   function parseSingleNote(note) {
+    console.log("Parsing note:", note);
     if (typeof note?.soapNote_text === "string") {
       let cleaned = note.soapNote_text
         .replace(/^"+|"+$/g, "")

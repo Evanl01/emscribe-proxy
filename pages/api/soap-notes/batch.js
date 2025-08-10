@@ -2,6 +2,7 @@ import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { soapNoteSchema } from '@/src/app/schemas';
 import { decryptField, encryptionUtils } from '@/src/utils/encryptionUtils';
+import * as format from '@/public/scripts/format';
 
 const soapNoteTableName = 'soapNotes';
 
@@ -37,6 +38,17 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: decryptFieldResult.error });
       }
       delete soapNote.patientEncounter; // Clean up the joined field
+      try {
+        // Remove bad control characters except for \n, \r, \t
+
+        soapNote.soapNote_text = format.parseSoapNotes(soapNote.soapNote_text);
+        // console.log('Parsed SOAP note:', soapNote.id, "Data:", soapNote);
+        // soapNote.soapNote_text = JSON.parse(cleaned);
+      } catch (e) {
+        console.error('Failed to parse soapNote_text for SOAP note:', soapNote.id, ", soapNote_text:", soapNote.soapNote_text, "\n\nError:", e);
+        return res.status(400).json({ error: 'Failed to parse soapNote_text' });
+      }
+      // console.log('Decrypted SOAP note:', soapNote.id, "Data:", soapNote);
     }
     return res.status(200).json(data);
   }

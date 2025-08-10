@@ -3,7 +3,8 @@
 import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { recordingSchema } from '@/src/app/schemas';
-import { getTranscriptReqBody, getSoapNoteAndBillingRequestBody } from '@/src/utils/geminiRequestBodies'; // Adjust the import path as needed
+import * as geminiRequestBodies from '@/src/utils/geminiRequestBodies'; // Adjust the import path as needed
+import * as gptRequestBodies from '@/src/utils/gptRequestBodies'; // Adjust the import path as needed
 
 const recordingTableName = 'recordings';
 
@@ -31,7 +32,6 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
     // Start timer
-    const startTime = Date.now();
     // Set up SSE headers for progress updates
     res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -88,7 +88,7 @@ export default async function handler(req, res) {
         // Convert to buffer
         const audioBuffer = Buffer.from(await downloadData.arrayBuffer());
         const base64Audio = audioBuffer.toString('base64');
-        const transcriptReqBody = getTranscriptReqBody(base64Audio);
+        const transcriptReqBody = geminiRequestBodies.getTranscriptReqBody(base64Audio);
 
         // TRANSCRIBING RECORDING WITH GEMINI
         response.status = 'transcribing';
@@ -103,6 +103,7 @@ export default async function handler(req, res) {
             res.end();
             return;
         });
+        console.log('Transcription Result:', transcriptResult);
 
         response.status = 'transcription complete';
         response.message = 'Transcription complete!';
@@ -115,8 +116,8 @@ export default async function handler(req, res) {
         res.write(`data: ${JSON.stringify(response)}\n\n`);
 
         // Create SOAP Note and Billing Suggestion using Gemini API
-        const soapNoteAndBillingReqBody = getSoapNoteAndBillingRequestBody(transcriptResult.transcript);
-        const soapNoteAndBillingResult = await geminiAPIReq(soapNoteAndBillingReqBody).catch(error => {
+        const soapNoteAndBillingReqBody = gptRequestBodies.getSoapNoteAndBillingRequestBody(transcriptResult.transcript);
+        const soapNoteAndBillingResult = await gptAPIReq(soapNoteAndBillingReqBody, soapNoteAndBillingReqBody.model).catch(error => {
             response.status = 'error';
             response.message = `SOAP Note processing failed: ${error.message}`;
             res.write(`data: ${JSON.stringify(response)}\n\n`);
@@ -137,6 +138,7 @@ export default async function handler(req, res) {
         res.end();
     }
 }
+
 
 //  Handle Gemini API request
 async function geminiAPIReq(reqBody) {
@@ -167,6 +169,46 @@ async function geminiAPIReq(reqBody) {
 
     const responseText = geminiData.candidates[0].content.parts[0].text;
     return JSON.parse(responseText);
+}
+
+// Handle OpenAI GPT API request
+async function gptAPIReq(reqBody, model = "gpt-4o") {
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    const openaiApiUrl = process.env.OPENAI_API_URL || "https://api.openai.com/v1/chat/completions";
+    if (!openaiApiKey) {
+        throw new Error('OpenAI API key not configured');
+    }
+
+    const response = await fetch(openaiApiUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openaiApiKey}`,
+        },
+        body: JSON.stringify(reqBody)
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenAI API error: ${errorText}`);
+    }
+
+    const openaiData = await response.json();
+
+    if (!openaiData.choices || !openaiData.choices[0]?.message) {
+        throw new Error('Invalid response from OpenAI API');
+    }
+
+    // Print token usage
+    if (openaiData.usage) {
+        console.log(`Prompt tokens: ${openaiData.usage.prompt_tokens}`);
+        console.log(`Completion tokens: ${openaiData.usage.completion_tokens}`);
+        console.log(`Total tokens: ${openaiData.usage.total_tokens}`);
+    }
+
+
+    // Return the content of the first message
+    return openaiData.choices[0].message.content;
 }
 
 

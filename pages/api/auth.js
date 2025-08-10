@@ -1,6 +1,5 @@
 import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
-import { getUserIdByEmail } from '@/src/utils/getUserIdByEmail';
 
 export default async function handler(req, res) {
     const supabase = getSupabaseClient(req.headers.authorization);

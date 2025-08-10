@@ -5,6 +5,8 @@ import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
 import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPreviewOverlay";
+import ExportDataAsFileMenu from "@/src/components/ExportDataAsFileMenu";
+import id from "zod/v4/locales/id.cjs";
 
 function EditSoapNoteInner() {
   const router = useRouter();
@@ -52,25 +54,8 @@ function EditSoapNoteInner() {
             `Failed to fetch SOAP note: ${soapNoteRes.statusText}`
           );
         }
-        const data = await soapNoteRes.json();
-        if (typeof data.soapNote_text === "string") {
-          let cleaned = data.soapNote_text
-            .replace(/^"+|"+$/g, "")
-            .replace(/""/g, '"')
-            .replace(/,(\s*[}\]])/g, "$1")
-            .replace(/[\u0000-\u001F\u007F-\u009F\u00A0]/g, " ");
-          // Attempt to fix nested colons (best effort, not perfect)
-          // .replace(/"(\w+)":"(\w+)":"([^"]*)"/g, '"$1_$2": "$3"');
-          try {
-            data.soapNote_text = JSON.parse(cleaned);
-          } catch (e) {
-            console.error("Failed to parse soapNote_text:", e, cleaned);
-            data.soapNote_text = {
-              error: "Invalid SOAP note format",
-              raw: cleaned,
-            };
-          }
-        }
+        let data = await soapNoteRes.json();
+        data = format.parseSoapNotes(data);
         if (!data) throw new Error("SOAP note not found");
 
         // 2. Set SOAP note fields
@@ -282,7 +267,29 @@ function EditSoapNoteInner() {
   return (
     <>
       <div className="max-w-8xl mx-auto p-6">
-        <h1 className="text-3xl font-bold mb-8">Edit Soap Note</h1>
+        {/* Title row with Export button on right */}
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-3xl font-bold">Edit Soap Note</h1>
+          <ExportDataAsFileMenu
+            patientEncounterData={{ name: patientEncounterName }}
+            transcriptData={null}
+            soapNotesData={[
+              {
+                id: soapNoteId,
+
+                soapNote_text: {
+                  soapNote: {
+                    subjective: soapSubjective,
+                    objective: soapObjective,
+                    assessment: soapAssessment,
+                    plan: soapPlan,
+                  },
+                  billingSuggestion: billingSuggestion,
+                },
+              },
+            ]}
+          />
+        </div>
 
         {/* Section 1: Edit SOAP Note */}
         <div className="border border-gray-200 rounded-lg">
