@@ -1,7 +1,6 @@
 import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { recordingSchema } from '@/src/app/schemas';
-// import { validateOwnership } from '@/src/utils/validateOwnership';
 
 const recordingTableName = 'recordings';
 
