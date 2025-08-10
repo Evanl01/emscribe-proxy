@@ -17,11 +17,7 @@ export default async function handler(req, res) {
         const { id } = req.query;
         if (!id) return res.status(400).json({ error: 'Recording ID is required' });
         // Validate ownership before fetching
-        const isValid = await validateOwnership(recordingTableName, id, user.id);
-        if (!isValid) {
-            return res.status(403).json({ error: 'Invalid Recording id. Does not exist, or does not belong to user.' });
-        }
-
+        
         const { data, error } = await supabase //Only fetch recordings for the authenticated user
             .from(recordingTableName)
             .select('*') // Select all fields
