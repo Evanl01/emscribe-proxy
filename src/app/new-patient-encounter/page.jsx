@@ -808,6 +808,10 @@ export default function NewPatientEncounter() {
                         typeof jsonData.data === "string"
                           ? JSON.parse(jsonData.data)
                           : jsonData.data;
+                      console.log(
+                        "[generateSoapNote]: Parsed SOAP note data:",
+                        parsed
+                      );
 
                       noteObj = parsed.soap_note || {};
                       billingObj = parsed.billing || {};
@@ -835,18 +839,22 @@ export default function NewPatientEncounter() {
                       setSoapPlan(soapPlanText);
 
                       // Format billing suggestion for textarea (as readable text)
-                      let billingText = "";
-                      if (billingObj.icd10_codes) {
-                        billingText += `ICD10 Codes: ${billingObj.icd10_codes.join(
-                          ", "
-                        )}\n`;
-                      }
-                      if (billingObj.billing_code) {
-                        billingText += `CPT/Billing Code: ${billingObj.billing_code}\n`;
-                      }
-                      if (billingObj.additional_inquiries) {
-                        billingText += `Additional Inquiries: ${billingObj.additional_inquiries}\n`;
-                      }
+                      // let billingText = "";
+                      // if (billingObj.icd10_codes) {
+                      //   billingText += `ICD10 Codes: ${billingObj.icd10_codes.join(
+                      //     ", "
+                      //   )}\n`;
+                      // }
+                      // if (billingObj.billing_code) {
+                      //   billingText += `CPT/Billing Code: ${billingObj.billing_code}\n`;
+                      // }
+                      // if (billingObj.additional_inquiries) {
+                      //   billingText += `Additional Inquiries: ${billingObj.additional_inquiries}\n`;
+                      // }
+                      let billingText =
+                        typeof billingObj === "string"
+                          ? billingObj
+                          : format.printJsonObject(billingObj);
                       setBillingSuggestion(billingText.trim());
 
                       setIsProcessing(false);
@@ -874,10 +882,17 @@ export default function NewPatientEncounter() {
         }
       } catch (error) {
         console.error("[generateSoapNote]: Error", error);
-        alert(`Error generating SOAP note: ${error.message}`);
+        const errorMsg =
+          typeof error === "string" ? error : error?.message || "";
+
+        if (errorMsg.includes("expired token") || errorMsg.includes("401")) {
+          router.push("/login");
+          return;
+        }
+        alert(`Error generating SOAP note: ${errorMsg}`);
         setCurrentStatus({
           status: "error",
-          message: `Failed to process recording: ${error.message}`,
+          message: `Failed to process recording: ${errorMsg}`,
         });
         setIsProcessing(false);
       }

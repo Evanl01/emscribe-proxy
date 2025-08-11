@@ -85,6 +85,7 @@ export default async function handler(req, res) {
             res.end();
             return;
         }
+        console.log('Downloaded audio file:', downloadData);
         // Convert to buffer
         const audioBuffer = Buffer.from(await downloadData.arrayBuffer());
         const base64Audio = audioBuffer.toString('base64');
@@ -103,6 +104,12 @@ export default async function handler(req, res) {
             res.end();
             return;
         });
+        if(!transcriptResult || !transcriptResult.transcript) {
+            // response.status = 'error';
+            // response.message = 'Transcription result is empty or invalid';
+            console.error('Transcription result is empty or invalid:', transcriptResult);
+            return res.status(400).json({ error: 'Failed to create transcript. Please try again.' });
+        }
         console.log('Transcription Result:', transcriptResult);
 
         response.status = 'transcription complete';
@@ -124,6 +131,10 @@ export default async function handler(req, res) {
             res.end();
             return;
         });
+        if (!soapNoteAndBillingResult) {
+            return res.status(400).json({ error: 'Failed to create SOAP note and billing suggestion. Please try again.' });
+        }
+        console.log('SOAP Note and Billing Suggestion Result:', soapNoteAndBillingResult);
 
         response.status = 'soap note complete';
         response.message = 'SOAP note and billing suggestion created successfully!';

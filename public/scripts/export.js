@@ -1,7 +1,7 @@
 import jsPDF from "jspdf";
 import { Document, Packer, Paragraph, HeadingLevel } from "docx";
 import { saveAs } from "file-saver";
-
+import * as format from "@/public/scripts/format.js";
 /**
  * Export patient encounter data as PDF or Word.
  * Only includes sections present in the data object.
@@ -71,7 +71,7 @@ export async function exportDataAsFile(data, type = "pdf") {
             for (const [key, value] of Object.entries(soapNoteObject)) {
               if (value) {
                 addHeader(key.charAt(0).toUpperCase() + key.slice(1), 14, 8);
-                addBody(value, 12, 8);
+                addBody(format.printJsonObject(value), 12, 8);
               }
             }
           }
@@ -86,7 +86,7 @@ export async function exportDataAsFile(data, type = "pdf") {
             for (const [key, value] of Object.entries(billingSuggestionObject)) {
               if (value) {
                 addHeader(key.charAt(0).toUpperCase() + key.slice(1), 14, 8);
-                addBody(value, 12, 8);
+                addBody(format.printJsonObject(value), 12, 8);
               }
             }
           }
@@ -113,6 +113,17 @@ export async function exportDataAsFile(data, type = "pdf") {
         spacing: spacing !== undefined ? spacing : { after: 400 },
       });
     }
+    function markdownTextColoredParagraph(markdownText, heading, color = "000000", spacing) {
+      if (typeof markdownText !== "string") return [];
+
+      const lines = markdownText.split("\n").filter(line => line.trim().length > 0);
+      console.log("Markdown lines for Word export:", lines);
+      const paragraphs = lines.map(line =>
+        coloredParagraph(line, heading, color, spacing)
+      );
+      return paragraphs;
+    }
+
 
     if (data.transcript) {
       children.push(
@@ -140,14 +151,14 @@ export async function exportDataAsFile(data, type = "pdf") {
             if (value) {
               children.push(
                 coloredParagraph(key.charAt(0).toUpperCase() + key.slice(1), HeadingLevel.HEADING_2, "2563eb", { before: 200 }),
-                coloredParagraph(value, undefined, "2563eb", {before: 50})
+                ...markdownTextColoredParagraph(value, undefined, "2563eb", {before: 50})
               );
             }
           }
         } else if (soapNoteObject) {
           children.push(
-            coloredParagraph("SOAP Note", HeadingLevel.HEADING_2, "2563eb", { before: 200 }),
-            coloredParagraph(soapNoteObject, undefined, "2563eb", {before: 50})
+            coloredParagraph("SOAP Note", HeadingLevel.HEADING_1, "2563eb", { before: 200 }),
+            ...markdownTextColoredParagraph(soapNoteObject, undefined, "2563eb", { after: 800 })
           );
         }
         children.push(new Paragraph({ text: "" })); // Add spacing after SOAP note
@@ -155,18 +166,18 @@ export async function exportDataAsFile(data, type = "pdf") {
         if (typeof billingSuggestionObject !== 'object') {
           children.push(
             coloredParagraph("Billing Suggestion", HeadingLevel.HEADING_2, "2563eb", { before: 400 }),
-            coloredParagraph(billingSuggestionObject, undefined, "2563eb")
+            ...markdownTextColoredParagraph(billingSuggestionObject, undefined, "2563eb")
           );
         }
         else {
           children.push(
-            coloredParagraph("Billing Suggestion", HeadingLevel.HEADING_2, "2563eb", { before: 400})
+            coloredParagraph("Billing Suggestion", HeadingLevel.HEADING_1, "2563eb", { before: 400})
           );
           for (const [key, value] of Object.entries(billingSuggestionObject)) {
             if (value) {
               children.push(
                 coloredParagraph(key.charAt(0).toUpperCase() + key.slice(1), HeadingLevel.HEADING_2, "2563eb", { before: 200 }),
-                coloredParagraph(value, undefined, "2563eb", {before: 50})
+                ...markdownTextColoredParagraph(value, undefined, "2563eb", {before: 50})
               );
             }
           }

@@ -15,6 +15,30 @@ export function printJsonObject(obj, level = 0) {
     }
     return indent(level) + String(obj);
 }
+
+/**
+ * Converts plain markdown text (with \n) to an array of docx Paragraphs for Word export.
+ * Each line separated by \n becomes a new Paragraph.
+ * @param {string} markdownText
+ * @param {object} [options] - Optional: heading, color, spacing, etc.
+ * @returns {Paragraph[]} Array of docx Paragraphs
+ */
+import { Paragraph, HeadingLevel } from "docx";
+
+export function markdownTextToWord(markdownText, options = {}) {
+    if (typeof markdownText !== "string") return [];
+
+    const lines = markdownText.split("\n").map(line => line.trim()).filter(line => line.length > 0);
+
+    return lines.map(line =>
+        new Paragraph({
+            text: line,
+            heading: options.heading,
+            color: options.color,
+            spacing: options.spacing,
+        })
+    );
+}
 // Clean markdown for plain text display, removing all HTML/markdown and adding indentation for levels
 export const cleanMarkdownText = (key, value, level = 0) => {
     // Helper for indentation
@@ -141,18 +165,18 @@ export const formatMarkdownText = (key, value, level = 0, fontSize = null) => {
 
         // Use marked to parse the markdown
         try {
-            let html = marked.parse(cleaned, { 
+            let html = marked.parse(cleaned, {
                 breaks: true,
-                gfm: true 
+                gfm: true
             });
             // Level-based formatting
             if (level === 0 && fontSize) {
                 html = `<span style="font-weight:bold;text-decoration:underline;">${html}</span>`;
 
                 html = wrapLarge(html, fontSize);
-            // } else if (level === 1) {
-            //     // Bold and underline for level 1
-            //     html = `<span style="font-weight:bold;">${html}</span>`;
+                // } else if (level === 1) {
+                //     // Bold and underline for level 1
+                //     html = `<span style="font-weight:bold;">${html}</span>`;
             } else if (level > 0) {
                 // Indent lower levels
                 html = `<div style="margin-left:${level * 3}ch;">${html}</div>`;
@@ -193,33 +217,33 @@ export const formatMarkdownText = (key, value, level = 0, fontSize = null) => {
 
 
 export function parseSoapNotes(input) {
-  // Helper to parse and clean a single note
-  function parseSingleNote(note) {
-    console.log("Parsing note:", note);
-    if (typeof note?.soapNote_text === "string") {
-      let cleaned = note.soapNote_text
-        .replace(/^"+|"+$/g, "")
-        .replace(/""/g, '"')
-        .replace(/,(\s*[}\]])/g, "$1")
-        .replace(/[\u0000-\u001F\u007F-\u009F\u00A0]/g, " ");
-      try {
-        note.soapNote_text = JSON.parse(cleaned);
-      } catch (e) {
-        console.error("Failed to parse soapNote_text:", e, cleaned);
-        note.soapNote_text = {
-          error: "Invalid SOAP note format",
-          raw: cleaned,
-        };
-      }
+    // Helper to parse and clean a single note
+    function parseSingleNote(note) {
+        console.log("Parsing note:", note);
+        if (typeof note?.soapNote_text === "string") {
+            let cleaned = note.soapNote_text
+                .replace(/^"+|"+$/g, "")
+                .replace(/""/g, '"')
+                .replace(/,(\s*[}\]])/g, "$1")
+                .replace(/[\u0000-\u001F\u007F-\u009F\u00A0]/g, " ");
+            try {
+                note.soapNote_text = JSON.parse(cleaned);
+            } catch (e) {
+                console.error("Failed to parse soapNote_text:", e, cleaned);
+                note.soapNote_text = {
+                    error: "Invalid SOAP note format",
+                    raw: cleaned,
+                };
+            }
+        }
+        return note;
     }
-    return note;
-  }
 
-  if (Array.isArray(input)) {
-    return input.map(parseSingleNote);
-  } else if (input && typeof input === "object") {
-    return parseSingleNote(input);
-  } else {
-    return input;
-  }
+    if (Array.isArray(input)) {
+        return input.map(parseSingleNote);
+    } else if (input && typeof input === "object") {
+        return parseSingleNote(input);
+    } else {
+        return input;
+    }
 }

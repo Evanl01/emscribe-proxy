@@ -19,12 +19,15 @@ async function checkAuthAndRedirect(router) {
       body: JSON.stringify({ action: "check-validity" }),
     });
     if (!response.ok) {
+      console.error("<Auth/>: Failed to validate JWT:", response.statusText);
       window.localStorage.removeItem("jwt");
       router.push("/login");
       return;
     }
     const data = await response.json();
+    console.log("<Auth/>: JWT is valid:", data);
     if (!data.valid) {
+      console.error("<Auth/>: Invalid data:", data);
       window.localStorage.removeItem("jwt");
       router.push("/login");
     }

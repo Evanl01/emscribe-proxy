@@ -32,7 +32,7 @@ export function getTranscriptReqBody(base64Audio) {
                 data: base64Audio
             }
         ],
-        max_tokens: 5000,
+        max_tokens: 9000,
         response_format: {
             type: "json_schema",
             json_schema: {
@@ -64,10 +64,10 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
             },
             {
                 role: "user",
-                content: `Here is a patient encounter transcript:\n\n${transcript}\n\nGenerate SOAP note and billing suggestions. Use bullet points and markdown formatting for clarity.`
+                content: `Here is a patient encounter transcript:\n\n${transcript}\n\nGenerate SOAP note and billing suggestions. Use bullet points and markdown formatting and "\\n"for clarity.`
             }
         ],
-        max_tokens: 5000,
+        max_tokens: 10000,
         response_format: {
             type: "json_schema",
             json_schema: {
@@ -83,7 +83,7 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                                     description: "Subjective findings - what the patient reports (symptoms, concerns, history)",
                                     properties: {
                                         "Chief complaint": { type: SchemaType.STRING, description: "Chief complaint of the patient" },
-                                        HPI: { type: SchemaType.STRING, description: "History of Present Illness" },
+                                        HPI: { type: SchemaType.STRING, description: "History of Present Illnesses. " },
                                         History: { type: SchemaType.STRING, description: "Past medical, surgical, family, and social history" },
                                         ROS: { type: SchemaType.STRING, description: "Review of Systems" },
                                         Medications: { type: SchemaType.STRING, description: "Current medications" },
