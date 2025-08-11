@@ -358,7 +358,7 @@ export default function NewPatientEncounter() {
   };
 
   // Get audio duration
-  const getAudioDuration = (file) => {
+  const getAudioDuration = async (file) => {
     return new Promise((resolve, reject) => {
       const audio = new Audio();
 
@@ -370,18 +370,43 @@ export default function NewPatientEncounter() {
         }
       };
 
+      console.log("Getting audio duration for file:", { name: file.name, size: file.size, type: file.type });
+
       const onLoadedMetadata = () => {
         cleanup();
         if (isFinite(audio.duration) && audio.duration > 0) {
+          console.log("Audio duration obtained:", audio.duration);
           resolve(audio.duration);
         } else {
-          reject(new Error(`Invalid audio duration: ${audio.duration}`));
+          // For WebM files or files with invalid duration metadata,
+          // use the recorded duration as fallback
+          console.warn(`Audio file has invalid duration: ${audio.duration}. Likely a locally recorded WebM file, trying fallback.`);
+
+          // If this is from a recording, use the recordingDuration
+          if (recordingDuration && recordingDuration > 0) {
+            console.warn(`Using recordingDuration: ${recordingDuration} seconds`);
+            resolve(recordingDuration);
+          } else {
+            // If no recording duration available, estimate based on file size
+            // This is a rough approximation: WebM files are typically ~1KB per second
+            const estimatedDuration = Math.max(1, file.size / 1024);
+            console.warn(`Using estimated duration: ${estimatedDuration} seconds`);
+            resolve(estimatedDuration);
+          }
         }
       };
 
       const onError = (e) => {
         cleanup();
-        reject(new Error("Could not load audio file for duration check"));
+        // Don't reject completely for WebM files, try to use recording duration
+        if (recordingDuration && recordingDuration > 0) {
+          console.warn(
+            "Audio metadata loading failed, using recorded duration"
+          );
+          resolve(recordingDuration);
+        } else {
+          reject(new Error("Could not load audio file for duration check"));
+        }
       };
 
       audio.addEventListener("loadedmetadata", onLoadedMetadata);
@@ -391,20 +416,21 @@ export default function NewPatientEncounter() {
       // Timeout after 10 seconds
       setTimeout(() => {
         cleanup();
-        reject(new Error("Timeout loading audio metadata"));
+        // Use recording duration as fallback on timeout
+        if (recordingDuration && recordingDuration > 0) {
+          console.warn(
+            "Audio metadata loading timed out, using recorded duration"
+          );
+          resolve(recordingDuration);
+        } else {
+          reject(new Error("Timeout loading audio metadata"));
+        }
       }, 10000);
     });
   };
 
   // Handle file upload
   const handleRecordingFileUpload = async (file) => {
-    // Clear old recording file from localStorage and reset local variables
-    localStorage.removeItem(LS_KEYS.recordingFile);
-    localStorage.removeItem(LS_KEYS.recordingFileMetadata);
-    setRecordingFile(null);
-    setRecordingDuration(0);
-    setRecordingFileMetadata(null);
-
     if (!file) return;
 
     const validationError = validateFile(file);
@@ -420,7 +446,6 @@ export default function NewPatientEncounter() {
         alert("Recording duration must be less than 40 minutes");
         return;
       }
-
       // Show uploading status
       setCurrentStatus({
         status: "uploading-recording",
@@ -463,6 +488,12 @@ export default function NewPatientEncounter() {
         alert("Error uploading to Supabase: " + error.message);
         return;
       }
+      // Clear old recording file from localStorage and reset local variables
+      localStorage.removeItem(LS_KEYS.recordingFile);
+      localStorage.removeItem(LS_KEYS.recordingFileMetadata);
+      setRecordingFile(null);
+      setRecordingDuration(0);
+      setRecordingFileMetadata(null);
 
       // Save enhanced metadata for later use
       const metadata = {
@@ -539,12 +570,22 @@ export default function NewPatientEncounter() {
   };
 
   // Start recording
+  // Fixed startRecording function with proper interval management
   const startRecording = async () => {
-    // Clear previous recording file and duration, and remove from localStorage
+    // Clear any existing interval first
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+      recordingIntervalRef.current = null;
+    }
+
+    // Clear previous recording file and remove from localStorage
     localStorage.removeItem(LS_KEYS.recordingFile);
-    localStorage.removeItem(LS_KEYS.audioFileMetadata);
+    localStorage.removeItem(LS_KEYS.recordingFileMetadata);
     setRecordingFile(null);
+    setRecordingFileMetadata(null);
+    // Reset recording duration to 0 when starting new recording
     setRecordingDuration(0);
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -568,18 +609,25 @@ export default function NewPatientEncounter() {
       };
 
       mediaRecorder.onstop = async () => {
+        // Clear the interval when recording stops
+        if (recordingIntervalRef.current) {
+          clearInterval(recordingIntervalRef.current);
+          recordingIntervalRef.current = null;
+        }
+
         const audioBlob = new Blob(audioChunksRef.current, {
           type: "audio/webm",
         });
         const recordingFile = new File([audioBlob], "recording.webm", {
           type: "audio/webm",
         });
-        // Save file to localStorage (as base64 string)
-        const reader = new FileReader();
-        reader.readAsDataURL(recordingFile);
 
-        // Centralized upload
-        await handleRecordingFileUpload(recordingFile);
+        // Set the recording file locally first (for immediate playback)
+        setRecordingFile(recordingFile);
+        console.log("Recording file set locally:", recordingFile);
+        // console.log("Recording duration:", recordingDuration);
+        // Upload the file to Supabase - pass true to indicate this is a recorded file
+        await handleRecordingFileUpload(recordingFile, true);
 
         // Stop all tracks
         stream.getTracks().forEach((track) => track.stop());
@@ -587,12 +635,12 @@ export default function NewPatientEncounter() {
 
       mediaRecorder.start(1000); // Collect data every second
       setIsRecording(true);
-      setRecordingDuration(0);
 
-      // Start duration counter
+      // Start duration counter - use functional update to avoid stale closure
       recordingIntervalRef.current = setInterval(() => {
-        setRecordingDuration((prev) => {
-          const newDuration = prev + 1;
+        setRecordingDuration((prevDuration) => {
+          const newDuration = prevDuration + 1;
+          // console.log(`Recording duration: ${newDuration} seconds`); // Debug log
           if (newDuration >= 40 * 60) {
             // 40 minutes max
             stopRecording();
@@ -606,16 +654,30 @@ export default function NewPatientEncounter() {
     }
   };
 
-  // Stop recording
+  // Fixed stopRecording function
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+
+      // Clear the interval
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
       }
     }
   };
+
+  // Add cleanup effect to prevent memory leaks
+  useEffect(() => {
+    // Cleanup function to clear interval on unmount
+    return () => {
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   // Generate SOAP note
   // Update the generateSoapNote function to handle recorded audio upload
