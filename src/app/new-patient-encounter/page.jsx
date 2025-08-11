@@ -120,6 +120,7 @@ export default function NewPatientEncounter() {
     localStorage.setItem(LS_KEYS.billingSuggestion, billingSuggestion);
   }, [billingSuggestion]);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const recordingDurationRef = useRef(0);
   const [isSaving, setIsSaving] = useState(false);
 
   // New: Track if save was attempted
@@ -365,12 +366,28 @@ export default function NewPatientEncounter() {
       const cleanup = () => {
         audio.removeEventListener("loadedmetadata", onLoadedMetadata);
         audio.removeEventListener("error", onError);
-        if (audio.src) {
-          URL.revokeObjectURL(audio.src);
-        }
+        if (audio.src) URL.revokeObjectURL(audio.src);
       };
 
-      console.log("Getting audio duration for file:", { name: file.name, size: file.size, type: file.type });
+      console.log("Getting audio duration for file:", {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      });
+
+      const fallbackDuration = () => {
+        // Try ref first to avoid stale state
+        const duration = recordingDurationRef.current;
+        setRecordingDuration(duration);
+        if (duration > 0) {
+          console.warn(`Using recordingDurationRef: ${duration} seconds`);
+          return duration;
+        }
+        // As last resort, estimate based on size (~1 KB ≈ 1 sec for WebM)
+        const estimated = Math.max(1, file.size / 1024);
+        console.warn(`Using estimated duration: ${estimated} seconds`);
+        return estimated;
+      };
 
       const onLoadedMetadata = () => {
         cleanup();
@@ -378,53 +395,23 @@ export default function NewPatientEncounter() {
           console.log("Audio duration obtained:", audio.duration);
           resolve(audio.duration);
         } else {
-          // For WebM files or files with invalid duration metadata,
-          // use the recorded duration as fallback
-          console.warn(`Audio file has invalid duration: ${audio.duration}. Likely a locally recorded WebM file, trying fallback.`);
-
-          // If this is from a recording, use the recordingDuration
-          if (recordingDuration && recordingDuration > 0) {
-            console.warn(`Using recordingDuration: ${recordingDuration} seconds`);
-            resolve(recordingDuration);
-          } else {
-            // If no recording duration available, estimate based on file size
-            // This is a rough approximation: WebM files are typically ~1KB per second
-            const estimatedDuration = Math.max(1, file.size / 1024);
-            console.warn(`Using estimated duration: ${estimatedDuration} seconds`);
-            resolve(estimatedDuration);
-          }
+          resolve(fallbackDuration());
         }
       };
 
-      const onError = (e) => {
+      const onError = () => {
         cleanup();
-        // Don't reject completely for WebM files, try to use recording duration
-        if (recordingDuration && recordingDuration > 0) {
-          console.warn(
-            "Audio metadata loading failed, using recorded duration"
-          );
-          resolve(recordingDuration);
-        } else {
-          reject(new Error("Could not load audio file for duration check"));
-        }
+        resolve(fallbackDuration());
       };
 
       audio.addEventListener("loadedmetadata", onLoadedMetadata);
       audio.addEventListener("error", onError);
       audio.src = URL.createObjectURL(file);
 
-      // Timeout after 10 seconds
+      // Timeout after 10s
       setTimeout(() => {
         cleanup();
-        // Use recording duration as fallback on timeout
-        if (recordingDuration && recordingDuration > 0) {
-          console.warn(
-            "Audio metadata loading timed out, using recorded duration"
-          );
-          resolve(recordingDuration);
-        } else {
-          reject(new Error("Timeout loading audio metadata"));
-        }
+        resolve(fallbackDuration());
       }, 10000);
     });
   };
@@ -446,6 +433,12 @@ export default function NewPatientEncounter() {
         alert("Recording duration must be less than 40 minutes");
         return;
       }
+      console.log("File metadata:", {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        duration,
+      });
       // Show uploading status
       setCurrentStatus({
         status: "uploading-recording",
@@ -585,6 +578,7 @@ export default function NewPatientEncounter() {
     setRecordingFileMetadata(null);
     // Reset recording duration to 0 when starting new recording
     setRecordingDuration(0);
+    recordingDurationRef.current = 0;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -640,11 +634,12 @@ export default function NewPatientEncounter() {
       recordingIntervalRef.current = setInterval(() => {
         setRecordingDuration((prevDuration) => {
           const newDuration = prevDuration + 1;
-          // console.log(`Recording duration: ${newDuration} seconds`); // Debug log
+          console.log(`Recording duration: ${newDuration} seconds`); // Debug log
           if (newDuration >= 40 * 60) {
             // 40 minutes max
             stopRecording();
           }
+          recordingDurationRef.current = newDuration;
           return newDuration;
         });
       }, 1000);
