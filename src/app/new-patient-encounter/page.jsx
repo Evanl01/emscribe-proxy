@@ -1465,8 +1465,7 @@ export default function NewPatientEncounter() {
                             objective: soapObjective,
                             assessment: soapAssessment,
                             plan: soapPlan,
-                          },
-                          billingSuggestion: billingSuggestion,
+                          }
                         },
                       },
                     ]}
@@ -1479,7 +1478,7 @@ export default function NewPatientEncounter() {
                       isSaving ? "opacity-50 cursor-not-allowed" : ""
                     }`}
                   >
-                    Preview
+                    Preview & Save
                   </button>
                 </div>
                 {errorMessage && (

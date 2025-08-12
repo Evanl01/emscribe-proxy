@@ -192,47 +192,22 @@ function EditSoapNoteInner() {
         assessment: soapAssessment.replace(/\r?\n/g, "\n"),
         plan: soapPlan.replace(/\r?\n/g, "\n"),
       };
-      let billingSuggestionObject = {};
-      // Try to extract fields by simple regex (ICD10, CPT, additional_inquiries)
-      const icdMatch = billingSuggestion.match(
-        /icd10[:\s]*([\s\S]*?)(cpt[:\s]|additional_inquiries[:\s]|$)/i
-      );
-      const cptMatch = billingSuggestion.match(
-        /cpt[:\s]*([\s\S]*?)(icd10[:\s]|additional_inquiries[:\s]|$)/i
-      );
-      const addMatch = billingSuggestion.match(
-        /additional_inquiries[:\s]*([\s\S]*?)(icd10[:\s]|cpt[:\s]|$)/i
-      );
-      billingSuggestionObject.icd10 = icdMatch
-        ? icdMatch[1].trim().replace(/\r?\n/g, "\n")
-        : "";
-      billingSuggestionObject.cpt = cptMatch
-        ? cptMatch[1].trim().replace(/\r?\n/g, "\n")
-        : "";
-      billingSuggestionObject.additional_inquiries = addMatch
-        ? addMatch[1].trim().replace(/\r?\n/g, "\n")
-        : "";
 
-      const soapNoteText = JSON.stringify({
-        soapNote: soapNoteObject,
-        billingSuggestion: billingSuggestionObject,
-      });
-      console.log("Saving SOAP note:", {
-        soapNoteId,
-        soapNoteText,
-      });
+      const payload = {
+        id: soapNoteId,
+        soapNote_text: {
+          soapNote: soapNoteObject,
+          billingSuggestion,
+        },
+      };
+      console.log("Saving SOAP note:", payload);
       const response = await fetch("/api/soap-notes", {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${api.getJWT()}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          // soapNote_text: soapNoteText,
-
-          id: soapNoteId,
-          soapNote_text: soapNoteText,
-        }),
+        body: JSON.stringify(payload),
         cache: "no-store",
       });
 
@@ -411,7 +386,7 @@ function EditSoapNoteInner() {
                   isSaving ? "opacity-50 cursor-not-allowed" : ""
                 }`}
               >
-                Preview
+                Preview & Save
               </button>
               {errorMessage && (
                 <div className="mt-3 text-red-600 text-sm text-right w-full">

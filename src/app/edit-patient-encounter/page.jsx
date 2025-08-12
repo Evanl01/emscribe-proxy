@@ -252,7 +252,7 @@ function EditPatientEncounterInner() {
       setIsSaving(false);
     }
   };
-  const saveDocument = async (id) => {
+  const saveSoapNote_BillingSuggestion = async (id) => {
     setIsSaving(true);
     const missingFields = [];
     if (!patientEncounterName.trim())
@@ -275,27 +275,6 @@ function EditPatientEncounterInner() {
         assessment: soapAssessment.replace(/\r?\n/g, "\n"),
         plan: soapPlan.replace(/\r?\n/g, "\n"),
       };
-      let billingSuggestionObject = {};
-      // Try to extract fields by simple regex (ICD10, CPT, additional_inquiries)
-      const icdMatch = billingSuggestion.match(
-        /icd10[:\s]*([\s\S]*?)(cpt[:\s]|additional_inquiries[:\s]|$)/i
-      );
-      const cptMatch = billingSuggestion.match(
-        /cpt[:\s]*([\s\S]*?)(icd10[:\s]|additional_inquiries[:\s]|$)/i
-      );
-      const addMatch = billingSuggestion.match(
-        /additional_inquiries[:\s]*([\s\S]*?)(icd10[:\s]|cpt[:\s]|$)/i
-      );
-      billingSuggestionObject.icd10 = icdMatch
-        ? icdMatch[1].trim().replace(/\r?\n/g, "\n")
-        : "";
-      billingSuggestionObject.cpt = cptMatch
-        ? cptMatch[1].trim().replace(/\r?\n/g, "\n")
-        : "";
-      billingSuggestionObject.additional_inquiries = addMatch
-        ? addMatch[1].trim().replace(/\r?\n/g, "\n")
-        : "";
-
       const response = await fetch("/api/soap-notes", {
         method: "PATCH",
         headers: {
@@ -306,7 +285,7 @@ function EditPatientEncounterInner() {
           id: id,
           soapNote_text: {
             soapNote: soapNoteObject,
-            billingSuggestion: billingSuggestionObject,
+            billingSuggestion,
           },
         }),
         cache: "no-store",
@@ -357,19 +336,6 @@ function EditPatientEncounterInner() {
       }));
     }
   };
-
-  // Save SOAP note handler (implement API call as needed)
-  const saveSoapNote = async () => {
-    // Add your PATCH/PUT logic here for saving the SOAP note
-    ui.showToast("SOAP note saved!", "success");
-    setOpenSections((prev) => ({
-      ...prev,
-      editSoapNote: false,
-    }));
-    setEditingSoapNote(null);
-    setSelectedSoapNoteId(null);
-  };
-
   return (
     <>
       <div className="max-w-8xl mx-auto p-6">
@@ -539,7 +505,7 @@ function EditPatientEncounterInner() {
                       isSaving ? "opacity-50 cursor-not-allowed" : ""
                     }`}
                   >
-                    Preview Transcript
+                    Preview & Save Transcript
                   </button>
                   {errorMessage && (
                     <div className="mt-3 text-red-600 text-sm text-right w-full">
@@ -797,7 +763,7 @@ function EditPatientEncounterInner() {
                       isSaving ? "opacity-50 cursor-not-allowed" : ""
                     }`}
                   >
-                    Preview SOAP Note and Billing Suggestion
+                    Preview & Save SOAP Note and Billing Suggestion
                   </button>
                 </div>
               </div>
@@ -835,7 +801,7 @@ function EditPatientEncounterInner() {
           setBillingSuggestion={setBillingSuggestion}
           patientEncounterName={previewPatientEncounterName}
           setPatientEncounterName={setPreviewPatientEncounterName}
-          onSave={() => saveDocument(selectedSoapNoteId)}
+          onSave={() => saveSoapNote_BillingSuggestion(selectedSoapNoteId)}
           isSaving={isSaving}
           errorMessage={errorMessage}
           sections={["soapNote", "billingSuggestion"]}

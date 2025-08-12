@@ -60,7 +60,7 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
         messages: [
             {
                 role: "system",
-                content: "You are a clinical documentation assistant trained to generate SOAP notes from detailed patient encounters. Your output must be accurate, complete, and formatted for EMR use. Do not summarize or omit important clinical details."
+                content: "You are a clinical documentation assistant trained to generate SOAP notes from detailed patient encounters. Your output must be accurate and avoid omitting important clinical details. But only output data if present in the transcript, otherwise leave it blank."
             },
             {
                 role: "user",
@@ -94,7 +94,7 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                                 },
                                 objective: {
                                     type: SchemaType.OBJECT,
-                                    description: "Objective clinical observations - measurable/observable findings (vitals, physical exam, lab results)",
+                                    description: "Objective clinical observations - measurable/observable findings (vitals, physical exam, lab results). If not mentioned in transcript, assume result is normal/as expected.",
                                     properties: {
                                         HEENT: { type: SchemaType.STRING, description: "HEENT (Head, Eyes, Ears, Nose, Throat) exam findings" },
                                         General: { type: SchemaType.STRING, description: "General exam findings" },
