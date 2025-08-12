@@ -2,7 +2,11 @@
 export function printJsonObject(obj, level = 0) {
     const indent = (lvl) => ' '.repeat(lvl * 3);
     if (typeof obj === 'string' || typeof obj === 'number') {
-        return indent(level) + String(obj);
+        // Split by \n and add indent to each line
+        return String(obj)
+            .split('\n')
+            .map(line => indent(level) + line)
+            .join('\n');
     } else if (Array.isArray(obj)) {
         return obj.map(item => printJsonObject(item, level + 1)).join('\n');
     } else if (typeof obj === 'object' && obj !== null) {

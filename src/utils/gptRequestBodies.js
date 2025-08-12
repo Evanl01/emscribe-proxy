@@ -56,18 +56,18 @@ export function getTranscriptReqBody(base64Audio) {
 
 export function getSoapNoteAndBillingRequestBody(transcript) {
     return {
-        model: "gpt-4o-mini",
+        model: "o3",
         messages: [
             {
                 role: "system",
-                content: "You are a medical note assistant. Return ONLY valid JSON matching the schema."
+                content: "You are a clinical documentation assistant trained to generate SOAP notes from detailed patient encounters. Your output must be accurate, complete, and formatted for EMR use. Do not summarize or omit important clinical details."
             },
             {
                 role: "user",
                 content: `Here is a patient encounter transcript:\n\n${transcript}\n\nGenerate SOAP note and billing suggestions. Use bullet points and markdown formatting and "\\n"for clarity.`
             }
         ],
-        max_tokens: 10000,
+        max_completion_tokens: 10000,
         response_format: {
             type: "json_schema",
             json_schema: {

@@ -858,6 +858,35 @@ export default function NewPatientEncounter() {
                       setBillingSuggestion(billingText.trim());
 
                       setIsProcessing(false);
+                      // Set localStorage with new keys
+                      localStorage.setItem(
+                        LS_KEYS.patientEncounterName,
+                        patientEncounterName
+                      );
+                      localStorage.setItem(
+                        LS_KEYS.transcript,
+                        transcript
+                      );
+                      localStorage.setItem(
+                        LS_KEYS.soapSubjective,
+                        soapSubjectiveText
+                      );
+                      localStorage.setItem(
+                        LS_KEYS.soapObjective,
+                        soapObjectiveText
+                      );
+                      localStorage.setItem(
+                        LS_KEYS.soapAssessment,
+                        soapAssessmentText
+                      );
+                      localStorage.setItem(
+                        LS_KEYS.soapPlan,
+                        soapPlanText
+                      );
+                      localStorage.setItem(
+                        LS_KEYS.billingSuggestion,
+                        billingText.trim()
+                      );
                     } catch (e) {
                       console.error(
                         "Failed to parse SOAP note JSON:",
