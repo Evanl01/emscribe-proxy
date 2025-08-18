@@ -5,7 +5,11 @@ import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { recordingSchema } from '@/src/app/schemas';
 import * as geminiRequestBodies from '@/src/utils/geminiRequestBodies'; // Adjust the import path as needed
 import * as gptRequestBodies from '@/src/utils/gptRequestBodies'; // Adjust the import path as needed
-
+import { transcribe_and_mask } from '@/pages/api/gcp/transcribe/complete'; // Import the transcribe_and_mask function
+import { unmask_phi } from '@/pages/api/aws/mask-phi';
+import { sendApiError, sendSseError } from '@/src/utils/apiErrorResponse';
+import ca from 'zod/v4/locales/ca.cjs';
+import tr from 'zod/v4/locales/tr.cjs';
 const recordingTableName = 'recordings';
 
 // Schema types for Gemini structured output
@@ -26,10 +30,10 @@ export default async function handler(req, res) {
     // Authenticate user for all methods
     const supabase = getSupabaseClient(req.headers.authorization);
     const { user, error: authError } = await authenticateRequest(req);
-    if (authError) return res.status(401).json({ error: authError });
+    if (authError) return sendApiError(res, 401, 'auth_error', authError);
 
     if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method not allowed' });
+        return sendApiError(res, 405, 'method_not_allowed', 'Method not allowed');
     }
     // Start timer
     // Set up SSE headers for progress updates
@@ -56,85 +60,153 @@ export default async function handler(req, res) {
             const parsed = JSON.parse(body);
             recording_file_path = parsed.recording_file_path;
         } catch (e) {
-            response.status = 'error';
-            response.message = 'Invalid JSON body or missing recording_file_path';
-            res.write(`data: ${JSON.stringify(response)}\n\n`);
-            res.end();
+            sendSseError(res, 400, 'Invalid JSON body or missing recording_file_path');
             return;
         }
         if (!recording_file_path) {
-            response.status = 'error';
-            response.message = 'recording_file_path is required';
-            res.write(`data: ${JSON.stringify(response)}\n\n`);
-            res.end();
+            sendSseError(res, 400, 'recording_file_path is required');
             return;
         }
 
         response.status = 'downloading';
         response.message = 'Downloading audio file from Supabase Storage...';
         res.write(`data: ${JSON.stringify(response)}\n\n`);
-
-        // Download file from Supabase Storage
-        const { data: downloadData, error: downloadError } = await supabase.storage
+        const expirySeconds = 60 * 60;
+        const { data: signedUrlData, error: signedError } = await supabase.storage
             .from('audio-files')
-            .download(recording_file_path);
-        if (downloadError || !downloadData) {
-            response.status = 'error';
-            response.message = `Failed to download audio file: ${downloadError?.message || 'Unknown error'}`;
-            res.write(`data: ${JSON.stringify(response)}\n\n`);
-            res.end();
-            return;
+            .createSignedUrl(recording_file_path, expirySeconds);
+        if (signedError) {
+            console.error('Signed URL error:', signedError);
+            return sendApiError(res, 500, 'signed_url_error', 'Failed to create signed URL: ' + signedError.message);
         }
-        console.log('Downloaded audio file:', downloadData);
-        // Convert to buffer
-        const audioBuffer = Buffer.from(await downloadData.arrayBuffer());
-        const base64Audio = audioBuffer.toString('base64');
-        const transcriptReqBody = geminiRequestBodies.getTranscriptReqBody(base64Audio);
+        const recording_file_signed_url = signedUrlData.signedUrl;
 
-        // TRANSCRIBING RECORDING WITH GEMINI
-        response.status = 'transcribing';
-        response.message = 'Transcribing audio...';
+        // Transcribe audio using cloud GCP and mask with AWS Comprehend medical
+        response.status = 'transcribe and mask';
+        response.message = 'Transcribing audio and masking PHI...';
         res.write(`data: ${JSON.stringify(response)}\n\n`);
 
-        // Transcribe audio using Gemini API
-        const transcriptResult = await geminiAPIReq(transcriptReqBody).catch(error => {
-            response.status = 'error';
-            response.message = `Transcription failed: ${error.message}`;
-            res.write(`data: ${JSON.stringify(response)}\n\n`);
-            res.end();
+        // Transcribe audio using cloud GCP and mask with AWS Comprehend medical
+        let transcriptResult;
+        const start_time = new Date().toISOString();
+        console.log("[transcribe_and_mask] Start time: ", start_time);
+        try {
+            transcriptResult = await transcribe_and_mask({ recording_file_signed_url, req, user });
+        }
+        catch (error) {
+            // Log full error + stack so backend logs show root cause
+            console.error('transcribe_and_mask error:', error?.message || error);
+            console.error(error?.stack || error);
+            sendSseError(res, 500,  `Transcription failed: ${error?.message || 'Unknown error'}`);
             return;
-        });
-        if(!transcriptResult || !transcriptResult.transcript) {
+        }
+        // const transcriptResult = await geminiAPIReq(transcriptReqBody).catch(error => {
+        //     response.status = 'error';
+        //     response.message = `Transcription failed: ${error.message}`;
+        //     res.write(`data: ${JSON.stringify(response)}\n\n`);
+        //     res.end();
+        //     return;
+        // });
+        if (!transcriptResult || !transcriptResult.cloudRunData?.transcript || !transcriptResult.maskResult?.masked_transcript || !transcriptResult.maskResult?.phi_entities) {
             // response.status = 'error';
             // response.message = 'Transcription result is empty or invalid';
-            console.error('Transcription result is empty or invalid:', transcriptResult);
-            return res.status(400).json({ error: 'Failed to create transcript. Please try again.' });
+            console.error('Transcription result is missing expected properties:', transcriptResult);
+            return sendApiError(res, 400, 'transcription_invalid', 'Failed to create transcript. Please try again.');
         }
+        const transcript = transcriptResult.cloudRunData.transcript;
+        const maskedTranscript = transcriptResult.maskResult.masked_transcript;
+        const phiEntities = transcriptResult.maskResult.phi_entities;
+        const transcribe_end_time = new Date().toISOString();
+        console.log('[transcribe_and_mask] Total time: ', transcribe_end_time - start_time);
         console.log('Transcription Result:', transcriptResult);
 
         response.status = 'transcription complete';
         response.message = 'Transcription complete!';
         // Send message, with additional 'data' field for transcript
-        res.write(`data: ${JSON.stringify({ ...response, data: { transcript: transcriptResult.transcript } })}\n\n`);
+        res.write(`data: ${JSON.stringify({ ...response, data: { transcript } })}\n\n`);
 
         // Create SOAP Note and Billing Suggestion request body
         response.status = 'creating soap note';
         response.message = 'Creating SOAP note and billing suggestion...';
         res.write(`data: ${JSON.stringify(response)}\n\n`);
 
-        // Create SOAP Note and Billing Suggestion using Gemini API
-        const soapNoteAndBillingReqBody = gptRequestBodies.getSoapNoteAndBillingRequestBody(transcriptResult.transcript);
-        const soapNoteAndBillingResult = await gptAPIReq(soapNoteAndBillingReqBody, soapNoteAndBillingReqBody.model).catch(error => {
-            response.status = 'error';
-            response.message = `SOAP Note processing failed: ${error.message}`;
-            res.write(`data: ${JSON.stringify(response)}\n\n`);
-            res.end();
+        // Create SOAP Note and Billing Suggestion using OpenAI API
+        const soapNoteAndBillingReqBody = gptRequestBodies.getSoapNoteAndBillingRequestBody(maskedTranscript);
+        let soapNoteAndBillingResultRaw;
+        try {
+            soapNoteAndBillingResultRaw = await gptAPIReq(soapNoteAndBillingReqBody);
+        } catch (error) {
+            sendSseError(res, 500, `SOAP Note processing failed: ${error.message}`);
             return;
-        });
-        if (!soapNoteAndBillingResult) {
-            return res.status(400).json({ error: 'Failed to create SOAP note and billing suggestion. Please try again.' });
         }
-        console.log('SOAP Note and Billing Suggestion Result:', soapNoteAndBillingResult);
+
+        if (!soapNoteAndBillingResultRaw) {
+            const error = 'soap empty response'
+            console.error(error, soapNoteAndBillingResultRaw);
+            sendSseError(res, 500, `Failed to create SOAP note and billing suggestion. Empty response from LLM.`);
+            return;
+        }
+        console.log('SOAP Note and Billing Suggestion Result Raw:', soapNoteAndBillingResultRaw);
+
+        let soapNoteAndBillingResultUnmasked;
+        try {
+            // Unmask any PHI tokens in the raw string before parsing
+            soapNoteAndBillingResultUnmasked = unmask_phi(soapNoteAndBillingResultRaw, phiEntities);
+        }
+        catch (err){
+            console.error('Failed to unmask PHI tokens:', err);
+            sendSseError(res, 500, `Failed to unmask PHI tokens: ${err.message}`);
+            return;
+        }
+        // Try to parse LLM response as JSON (some LLMs return stringified JSON)
+        // Prepare raw string for validation/unmasking: if LLM returned an object, stringify it
+        let rawString;
+        if (typeof soapNoteAndBillingResultRaw === 'string') {
+            rawString = soapNoteAndBillingResultRaw;
+        } else {
+            try {
+                rawString = JSON.stringify(soapNoteAndBillingResultRaw);
+            } catch (err) {
+                console.error('Failed to stringify LLM object response:', err, soapNoteAndBillingResultRaw);
+                sendSseError(res, 500, `Failed to convert LLM response to string: ${err.message}`);
+                return;
+            }
+        }
+
+        // Quick format validation before unmasking: ensure it looks like a JSON object containing expected keys
+        const looksLikeJson = rawString.trim().startsWith('{');
+        const hasKeys = rawString.includes('soap_note') && rawString.includes('billing');
+        if (!looksLikeJson || !hasKeys) {
+            console.error('LLM response failed basic format check:', rawString.slice(0, 400));
+            sendSseError(res, 500, `LLM response does not appear to be the expected JSON structure`);
+            return;
+        }
+
+        // Unmask any PHI tokens in the raw string before parsing
+        let unmaskRes;
+        try {
+            unmaskRes = unmask_phi(rawString, phiEntities || []);
+        } catch (err) {
+            console.error('Failed to unmask PHI tokens:', err);
+            sendSseError(res, 500, `Failed to unmask PHI tokens: ${err.message}`);
+            return;
+        }
+
+        const unmaskedString = (unmaskRes && typeof unmaskRes === 'object' && unmaskRes.unmasked_transcript)
+            ? unmaskRes.unmasked_transcript
+            : String(unmaskRes || rawString);
+
+        // Parse the unmasked string into JSON
+        let soapNoteAndBillingResult;
+        try {
+            soapNoteAndBillingResult = JSON.parse(unmaskedString);
+        } catch (err) {
+            console.error('Failed to parse LLM response as JSON after unmasking:', err, { unmaskedString });
+            sendSseError(res, 500, `Failed to parse SOAP note response as JSON: ${err.message}`);
+            return;
+        }
+        const end_time = new Date().toISOString();
+        console.log('{/prompt-llm} Total time: ', end_time - start_time);
 
         response.status = 'soap note complete';
         response.message = 'SOAP note and billing suggestion created successfully!';
@@ -183,7 +255,7 @@ async function geminiAPIReq(reqBody) {
 }
 
 // Handle OpenAI GPT API request
-async function gptAPIReq(reqBody, model = "gpt-4o") {
+async function gptAPIReq(reqBody) {
     const openaiApiKey = process.env.OPENAI_API_KEY;
     const openaiApiUrl = process.env.OPENAI_API_URL || "https://api.openai.com/v1/chat/completions";
     if (!openaiApiKey) {
@@ -265,3 +337,42 @@ async function gptAPIReq(reqBody, model = "gpt-4o") {
 
 //     return { uploadData, recordData };
 // }
+
+// Basic runtime validator for the expected soap_and_billing JSON schema.
+function validateSoapAndBilling(obj) {
+    if (!obj || typeof obj !== 'object') throw new Error('Response is not an object');
+    if (!obj.soap_note || typeof obj.soap_note !== 'object') throw new Error('Missing soap_note object');
+    if (!obj.billing || typeof obj.billing !== 'object') throw new Error('Missing billing object');
+
+    const s = obj.soap_note;
+    if (!s.subjective || typeof s.subjective !== 'object') throw new Error('Missing subjective object');
+    if (!s.objective || typeof s.objective !== 'object') throw new Error('Missing objective object');
+    if (typeof s.assessment !== 'string') throw new Error('assessment must be a string');
+    if (typeof s.plan !== 'string') throw new Error('plan must be a string');
+
+    // Check subjective required keys
+    const subjReq = ["Chief complaint", "HPI", "History", "ROS", "Medications", "Allergies"];
+    for (const k of subjReq) {
+        if (!(k in s.subjective)) throw new Error(`subjective missing required key: ${k}`);
+        if (typeof s.subjective[k] !== 'string') throw new Error(`subjective.${k} must be a string`);
+    }
+
+    // Objective required keys
+    const objReq = ["HEENT", "General", "Cardiovascular", "Musculoskeletal", "Other"];
+    for (const k of objReq) {
+        if (!(k in s.objective)) throw new Error(`objective missing required key: ${k}`);
+        if (typeof s.objective[k] !== 'string') throw new Error(`objective.${k} must be a string`);
+    }
+
+    // Billing checks
+    const b = obj.billing;
+    if (!Array.isArray(b.icd10_codes)) throw new Error('billing.icd10_codes must be an array');
+    if (b.icd10_codes.length < 1) throw new Error('billing.icd10_codes must contain at least one code');
+    if (typeof b.billing_code !== 'string') throw new Error('billing.billing_code must be a string');
+    if (typeof b.additional_inquiries !== 'string') throw new Error('billing.additional_inquiries must be a string');
+
+    // Limit check
+    if (b.icd10_codes.length > 10) throw new Error('billing.icd10_codes has too many entries');
+
+    return true;
+}
