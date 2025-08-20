@@ -416,6 +416,37 @@ export default function NewPatientEncounter() {
     });
   };
 
+  // Helper function to clear all auth-related storage when sessions get corrupted
+  const clearAllAuthState = async () => {
+    try {
+      // Clear Supabase sessions
+      await supabase.auth.signOut();
+      
+      // Clear localStorage entries
+      Object.keys(localStorage).forEach(key => {
+        if (key.includes('supabase') || key.includes('sb-') || key.includes('auth')) {
+          localStorage.removeItem(key);
+        }
+      });
+      
+      // Clear sessionStorage entries
+      Object.keys(sessionStorage).forEach(key => {
+        if (key.includes('supabase') || key.includes('sb-') || key.includes('auth')) {
+          sessionStorage.removeItem(key);
+        }
+      });
+      
+      // Clear API JWT
+      if (typeof api !== "undefined" && api.deleteJWT) {
+        api.deleteJWT();
+      }
+      
+      console.log("[clearAllAuthState] Cleared all authentication state");
+    } catch (e) {
+      console.error("[clearAllAuthState] Error clearing auth state:", e);
+    }
+  };
+
   // Helper: call server refresh endpoint and return accessToken (or null)
   const refreshAndGetAccessToken = async () => {
     try {
@@ -626,6 +657,13 @@ export default function NewPatientEncounter() {
           localStorageState: localStorageData,
           cookieCount: document.cookie.split(';').length,
           tabId: Math.random().toString(36).substring(7), // Random tab identifier
+          // Add storage inspection to debug stale sessions
+          supabaseStorageKeys: Object.keys(localStorage).filter(key => 
+            key.includes('supabase') || key.includes('sb-')
+          ),
+          sessionStorageKeys: Object.keys(sessionStorage).filter(key => 
+            key.includes('supabase') || key.includes('sb-')
+          ),
         });
       } catch (e) {
         console.log("[handleRecordingFileUpload] enhanced logging failed:", e);
@@ -641,7 +679,88 @@ export default function NewPatientEncounter() {
       }
 
       console.log("Current user:", { id: user.id, maskedEmail: maskEmailForLog(user.email) });
-      const userEmail = user.email;
+      
+      // CRITICAL FIX: Get user info from JWT instead of frontend client to avoid auth mismatch
+      let actualUser = user;
+      let actualEmail = user.email;
+      
+      try {
+        const jwt = typeof api !== "undefined" && api.getJWT ? api.getJWT() : null;
+        if (jwt) {
+          // Decode JWT to get the actual authenticated user
+          const base64Url = jwt.split('.')[1];
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+          }).join(''));
+          const jwtPayload = JSON.parse(jsonPayload);
+          
+          console.log("[handleRecordingFileUpload] JWT user vs Frontend user:", {
+            frontendUserId: user.id,
+            frontendEmail: maskEmailForLog(user.email),
+            jwtUserId: jwtPayload.sub,
+            jwtEmail: maskEmailForLog(jwtPayload.email),
+            mismatch: user.id !== jwtPayload.sub || user.email !== jwtPayload.email
+          });
+          
+          // If there's a mismatch, try to refresh the Supabase client session
+          if (user.id !== jwtPayload.sub || user.email !== jwtPayload.email) {
+            console.warn("[handleRecordingFileUpload] CRITICAL: Auth state mismatch detected! Attempting to refresh Supabase session...");
+            
+            try {
+              // Force session refresh by setting the session from JWT
+              await freshSupabase.auth.setSession({
+                access_token: jwt,
+                refresh_token: sessionResp?.data?.session?.refresh_token || ''
+              });
+              
+              // Re-check user after setting session
+              const refreshedUserResp = await freshSupabase.auth.getUser();
+              const refreshedUser = refreshedUserResp?.data?.user;
+              
+              console.log("[handleRecordingFileUpload] Session refresh result:", {
+                success: !!refreshedUser,
+                newUserId: refreshedUser?.id,
+                newEmail: maskEmailForLog(refreshedUser?.email),
+                matchesJWT: refreshedUser?.id === jwtPayload.sub
+              });
+              
+              // If refresh worked, update our user reference
+              if (refreshedUser && refreshedUser.id === jwtPayload.sub) {
+                console.log("[handleRecordingFileUpload] Successfully synchronized Supabase session with JWT");
+                // Update the module-level client too
+                await supabase.auth.setSession({
+                  access_token: jwt,
+                  refresh_token: sessionResp?.data?.session?.refresh_token || ''
+                });
+              }
+            } catch (refreshError) {
+              console.error("[handleRecordingFileUpload] Failed to refresh Supabase session:", refreshError);
+            }
+          }
+          
+          // Use JWT user data for file operations to match server expectations
+          if (jwtPayload.sub && jwtPayload.email) {
+            actualUser = { id: jwtPayload.sub, email: jwtPayload.email };
+            actualEmail = jwtPayload.email;
+            console.log("[handleRecordingFileUpload] Using JWT user for consistency");
+          }
+        }
+      } catch (e) {
+        console.warn("[handleRecordingFileUpload] Failed to decode JWT, using frontend user:", e);
+      }
+
+      // Double-check that we have valid user data before proceeding
+      if (!actualUser?.id || !actualEmail) {
+        setIsSaving(false);
+        setCurrentStatus({ status: "error", message: "Invalid user session" });
+        alert("Invalid user session. Please log in again.");
+        if (typeof api !== "undefined" && api.deleteJWT) api.deleteJWT();
+        router.push("/login");
+        return;
+      }
+
+      const userEmail = actualEmail;
 
       // Get extension from uploaded file name
       const originalName = file.name || "audio";
@@ -655,9 +774,10 @@ export default function NewPatientEncounter() {
         .padStart(2, "0")}${extension ? `.${extension}` : ""}`;
       console.log("[handleRecordingFileUpload] constructed filename/path:", {
         fileName,
-        filePath: `${user?.id || "anonymous"}/${fileName}`,
+        filePath: `${actualUser?.id || "anonymous"}/${fileName}`,
+        usingJwtUser: actualUser !== user,
       });
-      const filePath = `${user?.id || "anonymous"}/${fileName}`;
+      const filePath = `${actualUser?.id || "anonymous"}/${fileName}`;
 
       // Attempt upload: try current client first, then refresh+retry once if necessary
       // Also compare with fresh client to detect stale state issues
