@@ -7,6 +7,7 @@ import * as format from "@/public/scripts/format.js";
 import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPreviewOverlay";
 import ExportDataAsFileMenu from "@/src/components/ExportDataAsFileMenu";
 import id from "zod/v4/locales/id.cjs";
+import Auth from "@/src/components/Auth.jsx";
 
 function EditSoapNoteInner() {
   const router = useRouter();
@@ -241,6 +242,7 @@ function EditSoapNoteInner() {
 
   return (
     <>
+      <Auth />
       <div className="max-w-8xl mx-auto p-6">
         {/* Title row with Export button on right */}
         <div className="flex items-center justify-between mb-8">

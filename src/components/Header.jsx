@@ -3,9 +3,9 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import Auth from "@/src/components/Auth.jsx";
 import styled from "styled-components";
 import Image from "next/image";
+import * as api from "@/public/scripts/api.js";
 
 const AppHeader = styled.header`
   background-color: #ffffff;
@@ -60,6 +60,7 @@ const HeaderUserMenu = styled.div`
   justify-content: flex-end;
   flex-shrink: 0;
   margin-left: 2rem;
+  position: relative; /* anchor dropdown to this container */
 
   @media (max-width: 767px) {
     display: none;
@@ -155,12 +156,20 @@ const UserDropdownMenu = styled.div`
   position: absolute;
   right: 0;
   top: 100%;
+  width: 8rem;
   background: #fff;
   border-radius: 0.375rem;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
     0 2px 4px -1px rgba(0, 0, 0, 0.06);
   z-index: 102;
-  min-width: 10rem;
+  min-width: 8rem;
+  padding-top: 8px;
+  display: none;
+
+  /* show when parent header user menu is hovered (matches nav behavior) */
+  ${HeaderUserMenu}:hover & {
+    display: block;
+  }
 `;
 
 const UserDropdownItem = styled.button`
@@ -194,6 +203,23 @@ const Header = () => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
+  // Sign-out helper: call client API to clear tokens (no redirect) then
+  // navigate via Next router to preserve SPA navigation.
+  const signOutAndRedirect = async () => {
+    try {
+      // close menus immediately for UI responsiveness
+      setUserMenuOpen(false);
+      setMenuOpen(false);
+      // ask api helper to not perform its own redirect
+      await api.handleSignOut({ redirectTo: null });
+    } catch (e) {
+      // ignore errors here; still redirect to login
+      // console.warn('signOut error', e);
+    } finally {
+      router.push('/login');
+    }
+  };
+
   const navigation = [
     {
       category: "Dashboard",
@@ -216,57 +242,22 @@ const Header = () => {
     },
   ];
 
-  const handleSignOut = async () => {
-    try {
-      const response = await fetch("/api/auth", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ action: "sign-out" }),
-      });
 
-      if (response.ok) {
-        localStorage.removeItem("jwt");
-        router.push("/login");
-      } else {
-        console.error("Sign out failed", response.message);
-      }
-    } catch (error) {
-      console.error("Error signing out:", error);
-    }
-  };
-
+  // Use public/default-avatar.png for the user avatar to allow swapping
+  // with an image asset instead of inline SVG. Image is 32x32 and rounded.
   const DefaultUserAvatar = () => (
-    <svg
-      width="32"
-      height="32"
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className="user-avatar-default"
-    >
-      <circle
-        cx="12"
-        cy="12"
-        r="10"
-        fill="#e5e7eb"
-        stroke="#9ca3af"
-        strokeWidth="1"
-      />
-      <circle cx="12" cy="10" r="3" fill="#6b7280" />
-      <path
-        d="M7 18.5c0-2.5 2.2-4.5 5-4.5s5 2 5 4.5"
-        stroke="#6b7280"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
+    <Image
+      src="/default-avatar.png"
+      alt="User avatar"
+      width={32}
+      height={32}
+      style={{ borderRadius: "50%", objectFit: "cover" }}
+      priority={false}
+    />
   );
 
   return (
     <>
-      <Auth />
       <AppHeader>
         <HeaderContainer>
           <Link
@@ -329,8 +320,14 @@ const Header = () => {
                 </NavItem>
               ))}
             </DesktopMenu>
-            <HeaderUserMenu>
-              <UserMenuButton onClick={() => setUserMenuOpen(!userMenuOpen)}>
+            <HeaderUserMenu
+              onMouseEnter={() => setUserMenuOpen(true)}
+              onMouseLeave={() => setUserMenuOpen(false)}
+              onFocus={() => setUserMenuOpen(true)}
+              onBlur={() => setUserMenuOpen(false)}
+              tabIndex={0}
+            >
+              <UserMenuButton>
                 <DefaultUserAvatar />
                 <UserDropdownIcon viewBox="0 0 20 20" fill="currentColor">
                   <path
@@ -342,7 +339,7 @@ const Header = () => {
               </UserMenuButton>
               {userMenuOpen && (
                 <UserDropdownMenu>
-                  <UserDropdownItem onClick={handleSignOut}>
+                  <UserDropdownItem onClick={signOutAndRedirect}>
                     <svg
                       width="16"
                       height="16"
@@ -419,7 +416,7 @@ const Header = () => {
             ))}
             <div className="mt-4 pt-4 border-t border-gray-200">
               <button
-                onClick={handleSignOut}
+                onClick={signOutAndRedirect}
                 className="flex items-center w-full px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-50"
               >
                 <svg

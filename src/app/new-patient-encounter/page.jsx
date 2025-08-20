@@ -7,11 +7,12 @@ import * as format from "@/public/scripts/format.js";
 import * as validation from "@/public/scripts/validation.js";
 import * as background from "@/public/scripts/background.js";
 import { createClient } from "@supabase/supabase-js";
+import { getSupabaseClient } from "@/src/utils/supabase.js"
 import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPreviewOverlay";
 import { record, set } from "zod";
 import ExportDataAsFileMenu from "@/src/components/ExportDataAsFileMenu.jsx";
-
-const supabase = createClient(
+import Auth from "@/src/components/Auth.jsx";
+let supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
@@ -351,9 +352,9 @@ export default function NewPatientEncounter() {
     if (!validTypes.some((type) => file.type.includes(type))) {
       return "File must be in a supported audio format (MP3, WAV, WebM, OGG, MP4, M4A)";
     }
-    if (file.size > 30 * 1024 * 1024) {
-      // 30MB
-      return "File size must be less than 30MB";
+    if (file.size > 50 * 1024 * 1024) {
+      // 50MB
+      return "File size must be less than 50MB";
     }
     return null;
   };
@@ -416,6 +417,138 @@ export default function NewPatientEncounter() {
     });
   };
 
+  // Helper: call server refresh endpoint and return accessToken (or null)
+  const refreshAndGetAccessToken = async () => {
+    try {
+      const resp = await fetch("/api/auth/refresh", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!resp.ok) {
+        return null;
+      }
+      console.log("refreshAndGetAccessToken response:", resp);
+      const body = await resp.json();
+      return body?.accessToken || null;
+    } catch (e) {
+      console.error("refreshAndGetAccessToken error:", e);
+      return null;
+    }
+  };
+
+  // Helper: attempt upload with the current client first; on failure, refresh and retry once using a temporary client
+  const uploadWithTempClient = async (filePath, file) => {
+    // small helper to detect auth-like errors from Supabase client result.error
+    console.log("[uploadWithTempClient]: Before calling supabase.storage.upload. JWT:", api.getJWT());
+    const isAuthErrorFromSupabase = (err) => {
+      if (!err) return false;
+      // Supabase error objects can use different field names for HTTP status
+      const statusRaw = err.statusCode ?? err.status ?? err.status_code ?? err?.status;
+      const status = statusRaw ? Number(statusRaw) : null;
+      const message = (err?.message || err?.error || err?.msg || "")
+        .toString()
+        .toLowerCase();
+      console.log("Supabase error details:", { status, message, raw: err });
+
+      // Common auth-related HTTP statuses
+      if (status === 403) return true;
+
+      // Match common auth-related keywords in the message
+      if (/unauthoriz|authoriz|jwt|jws|token|session|access token/i.test(message)) return true;
+
+      return false;
+    };
+
+    // 1) Try with currently-initialized client (may be using anon key or already-authenticated client)
+    try {
+      console.log("Attempting upload with current Supabase client:", supabase);
+      const firstAttempt = await supabase.storage
+        .from("audio-files")
+        .upload(filePath, file, { upsert: false });
+
+      console.log("First attempt:", firstAttempt, "\nData:",firstAttempt.data);
+      // success
+      if (!firstAttempt.error && firstAttempt.data && firstAttempt.data.path) {
+        return { data: firstAttempt.data, error: null };
+      }
+
+      // If there's an error and it's NOT an auth error, throw it so caller handles it
+      if (firstAttempt.error && !isAuthErrorFromSupabase(firstAttempt.error)) {
+        // Throw the Supabase error object for caller
+        throw firstAttempt.error;
+      }
+
+      // Otherwise it's an auth-like error; fallthrough to refresh + retry
+      console.warn(
+        "Initial upload attempt failed and appears auth-related:",
+        firstAttempt.error
+      );
+    } catch (e) {
+      // If the thrown/caught exception is not an auth-like Supabase error, rethrow it
+      // (e may be a thrown Supabase error object or a thrown JS exception)
+      const maybeErrObj = e || {};
+      // If it's clearly an auth error, continue to refresh path; otherwise rethrow
+      if (!isAuthErrorFromSupabase(maybeErrObj)) {
+        console.warn("Initial upload threw non-auth error, rethrowing:", e);
+        throw e;
+      }
+      console.warn(
+        "Initial upload threw auth-like error, will attempt refresh and retry:",
+        e
+      );
+    }
+
+    // 2) Only for auth-like errors: Try refreshing access token and retry once with a temporary client
+    console.log("Attempting to refresh access token...");
+    const accessToken = await refreshAndGetAccessToken();
+    console.log("Access token after refresh:", accessToken);
+    if (!accessToken) {
+      // Caller should handle redirect to login
+      return {
+        data: null,
+        error: new Error("Session expired or refresh failed"),
+        requiresLogin: true,
+      };
+    }
+
+    try {
+      // Create a temporary supabase client for this upload only (do not mutate module-level client)
+      const tempSupabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+        {
+          global: { headers: { Authorization: `Bearer ${accessToken}` } },
+        }
+      );
+
+      const secondAttempt = await tempSupabase.storage
+        .from("audio-files")
+        .upload(filePath, file, { upsert: false });
+      console.log("Second attempt:", secondAttempt, "\nData:", secondAttempt.data);
+      if (secondAttempt.error) {
+        throw secondAttempt.error;
+      }
+      if (
+        !secondAttempt.error &&
+        secondAttempt.data &&
+        secondAttempt.data.path
+      ) {
+        return { data: secondAttempt.data, error: null };
+      }
+
+      // If retry failed, throw the error so caller can handle it
+
+      // Unexpected fallback
+      throw new Error(
+        "Upload failed on retry (unhandled error): " +
+          JSON.stringify(secondAttempt)
+      );
+    } catch (e) {
+      console.error("Retry upload threw or failed:", e);
+      throw e;
+    }
+  };
+
   // Handle file upload
   const handleRecordingFileUpload = async (file) => {
     if (!file) return;
@@ -470,17 +603,31 @@ export default function NewPatientEncounter() {
         .padStart(2, "0")}${extension ? `.${extension}` : ""}`;
       const filePath = `${user?.id || "anonymous"}/${fileName}`;
 
-      const { data, error } = await supabase.storage
-        .from("audio-files")
-        .upload(filePath, file, { upsert: false });
+      // Attempt upload: try current client first, then refresh+retry once if necessary
+      const uploadResult = await uploadWithTempClient(filePath, file);
 
       setIsSaving(false);
 
-      if (error) {
-        setCurrentStatus({ status: "error", message: error.message });
-        alert("Error uploading to Supabase: " + error.message);
+      if (uploadResult?.requiresLogin) {
+        alert("Session expired. Please log in again.");
+        api.deleteJWT();
+        router.push("/login");
         return;
       }
+
+      const { data, error } = uploadResult;
+
+      if (error || !data || !data?.path) {
+        setCurrentStatus({
+          status: "error",
+          message: error?.message || "Upload failed",
+        });
+        alert(
+          "Error uploading to Supabase: " + (error?.message || String(error))
+        );
+        return;
+      }
+
       // Clear old recording file from localStorage and reset local variables
       localStorage.removeItem(LS_KEYS.recordingFile);
       localStorage.removeItem(LS_KEYS.recordingFileMetadata);
@@ -728,7 +875,7 @@ export default function NewPatientEncounter() {
 
         // Now proceed with the API call using recording_file_path
         const payload = { recording_file_path: recording_file_path };
-        const response = await fetch("/api/prompt-llm", {
+        const response = await api.fetchWithRefresh("/api/prompt-llm", {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${api.getJWT()}`,
@@ -863,10 +1010,7 @@ export default function NewPatientEncounter() {
                         LS_KEYS.patientEncounterName,
                         patientEncounterName
                       );
-                      localStorage.setItem(
-                        LS_KEYS.transcript,
-                        transcript
-                      );
+                      localStorage.setItem(LS_KEYS.transcript, transcript);
                       localStorage.setItem(
                         LS_KEYS.soapSubjective,
                         soapSubjectiveText
@@ -879,10 +1023,7 @@ export default function NewPatientEncounter() {
                         LS_KEYS.soapAssessment,
                         soapAssessmentText
                       );
-                      localStorage.setItem(
-                        LS_KEYS.soapPlan,
-                        soapPlanText
-                      );
+                      localStorage.setItem(LS_KEYS.soapPlan, soapPlanText);
                       localStorage.setItem(
                         LS_KEYS.billingSuggestion,
                         billingText.trim()
@@ -1023,15 +1164,18 @@ export default function NewPatientEncounter() {
       };
 
       console.log("Saving patient encounter with data:", payload);
-      const response = await fetch("/api/patient-encounters/complete", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${api.getJWT()}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-        cache: "no-store", // Always fetch fresh data, never use cache
-      });
+      const response = await api.fetchWithRefresh(
+        "/api/patient-encounters/complete",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${api.getJWT()}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+          cache: "no-store", // Always fetch fresh data, never use cache
+        }
+      );
       console.log("Save response:", response);
 
       if (!response.ok) {
@@ -1085,6 +1229,7 @@ export default function NewPatientEncounter() {
 
   return (
     <>
+      <Auth />
       <div className="max-w-8xl mx-auto p-6">
         <h1 className="text-3xl font-bold mb-8">New Patient Encounter</h1>
 
@@ -1126,7 +1271,7 @@ export default function NewPatientEncounter() {
                       <div className="text-4xl mb-2">📁</div>
                       <div>Click to upload audio file</div>
                       <div className="text-sm text-gray-500 mt-2">
-                        Max 30MB, 40 minutes duration
+                        Max 50MB, 30 minutes duration
                         <br />
                         Supports MP3, WAV, WebM, OGG, MP4, M4A
                       </div>
@@ -1465,7 +1610,7 @@ export default function NewPatientEncounter() {
                             objective: soapObjective,
                             assessment: soapAssessment,
                             plan: soapPlan,
-                          }
+                          },
                         },
                       },
                     ]}

@@ -257,3 +257,64 @@ export function decryptAESKey(encryptedAESKey) {
     throw err;
   }
 }
+
+// PBKDF2-based refresh token hashing utilities (used for server-side refresh token storage)
+export function hashToken(token, salt) {
+  const HASH_ITERATIONS = 100000;
+  const HASH_KEYLEN = 64;
+  const HASH_DIGEST = 'sha512';
+  const HASH_SALT_LENGTH = 16; // bytes
+  if (!salt) salt = crypto.randomBytes(HASH_SALT_LENGTH).toString('hex');
+  const derived = crypto.pbkdf2Sync(token, salt, HASH_ITERATIONS, HASH_KEYLEN, HASH_DIGEST).toString('hex');
+  return `${salt}$${derived}`;
+}
+
+export function verifyTokenHash(token, stored) {
+  if (!stored) return false;
+  const HASH_ITERATIONS = 100000;
+  const HASH_KEYLEN = 64;
+  const HASH_DIGEST = 'sha512';
+  const parts = stored.split('$');
+  if (parts.length !== 2) return false;
+  const [salt, derived] = parts;
+  if (!salt || !derived) return false;
+  const test = crypto.pbkdf2Sync(token, salt, HASH_ITERATIONS, HASH_KEYLEN, HASH_DIGEST).toString('hex');
+  const a = Buffer.from(test, 'hex');
+  const b = Buffer.from(derived, 'hex');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+// AES-256-GCM helpers for encrypting refresh tokens at rest.
+// Expects process.env.REFRESH_TOKEN_AES_KEY_HEX to be a 64-character hex string (32 bytes).
+export function encryptRefreshToken(plain) {
+  const KEY_HEX = process.env.REFRESH_TOKEN_AES_KEY_HEX;
+  if (!KEY_HEX) throw new Error('Missing REFRESH_TOKEN_AES_KEY_HEX');
+  // expect hex string
+  const KEY = Buffer.from(KEY_HEX, 'hex');
+  if (KEY.length !== 32) throw new Error('REFRESH_TOKEN_AES_KEY_HEX must be 32 bytes (hex)');
+
+  const iv = crypto.randomBytes(12); // 96-bit recommended for GCM
+  const cipher = crypto.createCipheriv('aes-256-gcm', KEY, iv);
+  const ciphertext = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  // store iv (12) + tag (16) + ciphertext as base64
+  return Buffer.concat([iv, tag, ciphertext]).toString('base64');
+}
+
+export function decryptRefreshToken(tokenEncB64) {
+  const KEY_HEX = process.env.REFRESH_TOKEN_AES_KEY_HEX;
+  if (!KEY_HEX) throw new Error('Missing REFRESH_TOKEN_AES_KEY_HEX');
+  const KEY = Buffer.from(KEY_HEX, 'hex');
+  if (KEY.length !== 32) throw new Error('REFRESH_TOKEN_AES_KEY_HEX must be 32 bytes (hex)');
+
+  const buf = Buffer.from(tokenEncB64 || '', 'base64');
+  if (buf.length < 12 + 16) throw new Error('Invalid encrypted token format');
+  const iv = buf.subarray(0, 12);
+  const tag = buf.subarray(12, 28);
+  const ciphertext = buf.subarray(28);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', KEY, iv);
+  decipher.setAuthTag(tag);
+  const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  return decrypted.toString('utf8');
+}

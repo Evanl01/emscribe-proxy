@@ -28,27 +28,35 @@ export default function LoginPage() {
     }
     setLoading(true);
     try {
-      // Use Supabase Auth for client-side authentication
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      // Sign in via server so it can persist the refresh token and set HttpOnly cookie
+      const resp = await fetch('/api/auth', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sign-in', email, password }),
       });
-      if (error) throw new Error(error.message);
-      // Save JWT to localStorage for backend API and extension
-      const jwt = data.session?.access_token;
-      if (!jwt) throw new Error("No access token returned from Supabase.");
-      window.localStorage.setItem("jwt", jwt);
-      window.localStorage.setItem("userEmail", email);
-      // Notify extension content script (if present) via window.postMessage
-      window.postMessage(
-        {
-          type: "EMSCRIBE_LOGIN",
-          jwt,
-          userEmail: email,
-        },
-        "*"
-      );
-      router.push("/dashboard");
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body?.error || `Sign-in failed (${resp.status})`);
+      }
+      const body = await resp.json();
+      // debug: surface whether server attempted to set refresh cookie
+      try {
+        console.debug('server sign-in response', { cookieSet: body.cookieSet, status: resp.status });
+      } catch (e) {}
+      // Server may return token as a plain string or as an object { access_token }
+      const jwt =
+        typeof body?.token === 'string'
+          ? body.token
+          : body?.token?.access_token || body?.token?.accessToken || null;
+      if (!jwt) {
+        // Try other shapes: some flows return token.access_token inside token
+        throw new Error('No access token returned from server sign-in');
+      }
+      window.localStorage.setItem('jwt', jwt);
+      window.localStorage.setItem('userEmail', email);
+      window.postMessage({ type: 'EMSCRIBE_LOGIN', jwt, userEmail: email }, '*');
+      router.push('/dashboard');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -92,9 +100,24 @@ export default function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             disabled={loading}
           />
-          <a href="/signup" style={{ color: "#1976d2", fontSize: "14px", display: "block", marginBottom: "16px" }}>
+          <button
+            type="button"
+            onClick={() => router.push("/signup")}
+            style={{
+              color: "#1976d2",
+              fontSize: "14px",
+              display: "inline-block",
+              width: "auto",
+              textAlign: "left",
+              marginBottom: "16px",
+              background: "none",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+            }}
+          >
             Create an account
-          </a>
+          </button>
           <button id="loginBtn" type="submit" disabled={loading}>
             {loading ? "Logging in..." : "Login"}
           </button>
