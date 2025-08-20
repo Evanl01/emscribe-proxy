@@ -7,7 +7,6 @@ import * as format from "@/public/scripts/format.js";
 import * as validation from "@/public/scripts/validation.js";
 import * as background from "@/public/scripts/background.js";
 import { createClient } from "@supabase/supabase-js";
-import { getSupabaseClient } from "@/src/utils/supabase.js"
 import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPreviewOverlay";
 import { record, set } from "zod";
 import ExportDataAsFileMenu from "@/src/components/ExportDataAsFileMenu.jsx";
@@ -579,16 +578,48 @@ export default function NewPatientEncounter() {
       });
       setIsSaving(true);
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      // Check current auth state with Supabase and log masked info for debugging
+      const userResp = await supabase.auth.getUser();
+      const sessionResp = await supabase.auth.getSession();
+      const user = userResp?.data?.user || null;
 
+      const maskEmailForLog = (email) => {
+        try {
+          if (!email || typeof email !== "string") return null;
+          const parts = email.split("@");
+          if (parts.length !== 2) return "***";
+          const local = parts[0];
+          const domain = parts[1];
+          const maskedLocal = local.length <= 2 ? local.replace(/./g, "*") : local[0] + local.slice(1, 2).replace(/./g, "*") + local.slice(-1);
+          return `${maskedLocal}@${domain}`;
+        } catch (e) {
+          return "***";
+        }
+      };
+
+      // Log summary (avoid printing full tokens/emails) to help debug multi-tab/session issues
+      try {
+        const jwt = typeof api !== "undefined" && api.getJWT ? api.getJWT() : null;
+        console.log("[handleRecordingFileUpload] supabase.getUser result:", {
+          hasUser: !!user,
+          maskedEmail: user ? maskEmailForLog(user.email) : null,
+          sessionExists: !!sessionResp?.data?.session,
+          jwtPresent: !!jwt,
+        });
+      } catch (e) {
+        console.log("[handleRecordingFileUpload] supabase.getUser logging failed", e);
+      }
+      // If no user is available in the client, stop and prompt for login
       if (!user) {
-        alert("You must be logged in to upload files.");
+        setIsSaving(false);
+        setCurrentStatus({ status: "error", message: "Not logged in" });
+        alert("You must be logged in to upload recordings.");
+        if (typeof api !== "undefined" && api.deleteJWT) api.deleteJWT();
         router.push("/login");
         return;
       }
 
+      console.log("Current user:", { id: user.id, maskedEmail: maskEmailForLog(user.email) });
       const userEmail = user.email;
 
       // Get extension from uploaded file name
@@ -601,6 +632,10 @@ export default function NewPatientEncounter() {
       )
         .toString()
         .padStart(2, "0")}${extension ? `.${extension}` : ""}`;
+      console.log("[handleRecordingFileUpload] constructed filename/path:", {
+        fileName,
+        filePath: `${user?.id || "anonymous"}/${fileName}`,
+      });
       const filePath = `${user?.id || "anonymous"}/${fileName}`;
 
       // Attempt upload: try current client first, then refresh+retry once if necessary

@@ -6,7 +6,8 @@ import { serialize } from 'cookie';
 
 // Config
 const REFRESH_MAX_AGE_SECONDS = Number(process.env.REFRESH_MAX_AGE_SECONDS || 3 * 24 * 3600); // default 3 days
-const REFRESH_INACTIVITY_LIMIT_MS = Number(process.env.REFRESH_INACTIVITY_LIMIT_MS || 3 * 24 * 3600 * 1000);
+// Use seconds-based env var for readability; convert to ms for comparisons
+const REFRESH_INACTIVITY_LIMIT_SECONDS = Number(process.env.REFRESH_INACTIVITY_LIMIT_SECONDS || 3 * 24 * 3600); // default 3 days
 const refreshTokensTable = 'refreshTokens';
 
 // Cookie options configurable via env. Defaults are safe for same-site deployments.
@@ -118,7 +119,7 @@ export default async function handler(req, res) {
   }
 
   // inactivity check
-  if (row.last_activity_at && (Date.now() - new Date(row.last_activity_at).getTime()) > REFRESH_INACTIVITY_LIMIT_MS) {
+  if (row.last_activity_at && (Date.now() - new Date(row.last_activity_at).getTime()) > REFRESH_INACTIVITY_LIMIT_SECONDS * 1000) {
     // revoke
     await sb.from(refreshTokensTable).update({ revoked: true }).eq('id', tokenId);
     return res.status(401).json({ error: 'session_inactive' });

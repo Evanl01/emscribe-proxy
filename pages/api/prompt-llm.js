@@ -74,13 +74,20 @@ export default async function handler(req, res) {
         response.message = 'Downloading audio file from Supabase Storage...';
         res.write(`data: ${JSON.stringify(response)}\n\n`);
 
-        // Download file from Supabase Storage
+        // Normalize recording_file_path and Download file from Supabase Storage
+        let normalizedPath = recording_file_path;
+        if (typeof normalizedPath === 'string') {
+            if (normalizedPath.startsWith('audio-files/')) normalizedPath = normalizedPath.replace(/^audio-files\//, '');
+            if (normalizedPath.startsWith('/')) normalizedPath = normalizedPath.slice(1);
+        }
+        console.log('Attempting to download audio file from path:', normalizedPath);
         const { data: downloadData, error: downloadError } = await supabase.storage
             .from('audio-files')
-            .download(recording_file_path);
+            .download(normalizedPath);
         if (downloadError || !downloadData) {
             response.status = 'error';
             response.message = `Failed to download audio file: ${downloadError?.message || 'Unknown error'}`;
+            console.error('Download error:', downloadError, 'requestedPath:', recording_file_path, 'normalizedPath:', normalizedPath);
             res.write(`data: ${JSON.stringify(response)}\n\n`);
             res.end();
             return;

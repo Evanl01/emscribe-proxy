@@ -49,10 +49,13 @@ export default async function handler(req, res) {
         if (!storagePath) {
             return res.status(400).json({ error: 'No audio file associated with this recording.' });
         }
+        // Normalize legacy paths that accidentally stored the bucket prefix
+        storagePath = storagePath.replace(/^\/|^\/.*/, (s) => s); // noop safe guard
         if (storagePath.startsWith('audio-files/')) {
-            storagePath = storagePath.replace('audio-files/', ''); // Remove the prefix for deletion
+            storagePath = storagePath.replace(/^audio-files\//, ''); // Remove the prefix for deletion
         }
-        // console.log('Deleting audio file at path:', storagePath);
+        // Ensure no leading slash
+        if (storagePath.startsWith('/')) storagePath = storagePath.slice(1);
         const { error: fileDeleteError } = await supabase.storage
             .from('audio-files')
             .remove([storagePath]);
@@ -88,7 +91,7 @@ export default async function handler(req, res) {
         }
         const updateFields = {};
         if (recording.name) updateFields.name = recording.name;
-        if (recording.audio_file_path) updateFields.audio_file_path = recording.audio_file_path;
+    if (recording.audio_file_path) updateFields.audio_file_path = recording.audio_file_path;
         // Add other fields as needed
 
         if (Object.keys(updateFields).length === 0) {
