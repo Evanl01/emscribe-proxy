@@ -416,6 +416,81 @@ export default function NewPatientEncounter() {
     });
   };
 
+  // Helper function to detect incognito/private browsing mode
+  const detectIncognitoMode = async () => {
+    try {
+      // Check if we're on localhost (browsers are more permissive with localhost in incognito)
+      const isLocalhost = window.location.hostname === 'localhost' || 
+                         window.location.hostname === '127.0.0.1' ||
+                         window.location.hostname.includes('localhost');
+      
+      // Test storage quota - incognito usually has very limited quota
+      if ('storage' in navigator && 'estimate' in navigator.storage) {
+        const estimate = await navigator.storage.estimate();
+        const quotaMB = estimate.quota / (1024 * 1024);
+        
+        // Localhost may have relaxed incognito restrictions
+        if (isLocalhost) {
+          // For localhost, also check for browser-specific incognito indicators
+          const isLikelyIncognito = quotaMB < 120 || 
+                                   (window.navigator && window.navigator.webdriver) ||
+                                   !window.indexedDB ||
+                                   window.navigator.temporaryStorage;
+          return isLikelyIncognito ? 'localhost-incognito' : false;
+        }
+        
+        // Production domains: standard incognito detection
+        return quotaMB < 120;
+      }
+      
+      
+      // Fallback: test localStorage persistence
+      const testKey = 'incognito-test-' + Math.random();
+      try {
+        localStorage.setItem(testKey, 'test');
+        localStorage.removeItem(testKey);
+        return isLocalhost ? 'localhost-normal' : false; // localStorage works normally
+      } catch (e) {
+        return true; // localStorage restricted
+      }
+    } catch (e) {
+      return null; // Unable to determine
+    }
+  };
+
+  // Helper to get storage quota information
+  const getStorageQuota = async () => {
+    try {
+      if ('storage' in navigator && 'estimate' in navigator.storage) {
+        const estimate = await navigator.storage.estimate();
+        return {
+          quota: Math.round(estimate.quota / (1024 * 1024)) + 'MB',
+          usage: Math.round(estimate.usage / (1024 * 1024)) + 'MB',
+          available: Math.round((estimate.quota - estimate.usage) / (1024 * 1024)) + 'MB'
+        };
+      }
+      return null;
+    } catch (e) {
+      return { error: e.message };
+    }
+  };
+
+  // Helper to test third-party cookie functionality
+  const testThirdPartyCookies = async () => {
+    try {
+      // Test if we can set a cookie
+      document.cookie = "test-cookie=test-value; SameSite=None; Secure";
+      const cookieSet = document.cookie.includes("test-cookie=test-value");
+      
+      // Clean up
+      document.cookie = "test-cookie=; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=None; Secure";
+      
+      return cookieSet;
+    } catch (e) {
+      return false;
+    }
+  };
+
   // Helper function to clear all auth-related storage when sessions get corrupted
   const clearAllAuthState = async () => {
     try {
@@ -437,10 +512,8 @@ export default function NewPatientEncounter() {
       });
       
       // Clear API JWT
-      if (typeof api !== "undefined" && api.deleteJWT) {
-        api.deleteJWT();
-      }
-      
+      api.deleteJWT();
+
       console.log("[clearAllAuthState] Cleared all authentication state");
     } catch (e) {
       console.error("[clearAllAuthState] Error clearing auth state:", e);
@@ -618,7 +691,7 @@ export default function NewPatientEncounter() {
       
       const userResp = await freshSupabase.auth.getUser();
       const sessionResp = await freshSupabase.auth.getSession();
-      const user = userResp?.data?.user || null;
+      let user = userResp?.data?.user || null;
 
       const maskEmailForLog = (email) => {
         try {
@@ -636,7 +709,7 @@ export default function NewPatientEncounter() {
 
       // Log summary (avoid printing full tokens/emails) to help debug multi-tab/session issues
       try {
-        const jwt = typeof api !== "undefined" && api.getJWT ? api.getJWT() : null;
+        const jwt = api.getJWT();
         const localStorageData = {
           hasRecordingMetadata: !!localStorage.getItem(LS_KEYS.recordingFileMetadata),
           authKeys: Object.keys(localStorage).filter(key => key.includes('auth') || key.includes('supabase')),
@@ -664,6 +737,11 @@ export default function NewPatientEncounter() {
           sessionStorageKeys: Object.keys(sessionStorage).filter(key => 
             key.includes('supabase') || key.includes('sb-')
           ),
+          // Add incognito/privacy mode detection
+          isIncognito: await detectIncognitoMode(),
+          cookieEnabled: navigator.cookieEnabled,
+          storageQuota: await getStorageQuota(),
+          thirdPartyCookies: await testThirdPartyCookies(),
         });
       } catch (e) {
         console.log("[handleRecordingFileUpload] enhanced logging failed:", e);
@@ -671,9 +749,91 @@ export default function NewPatientEncounter() {
       // If no user is available in the client, stop and prompt for login
       if (!user) {
         setIsSaving(false);
+        
+        // INCOGNITO FIX: Check if we have JWT but no Supabase session (split-brain auth)
+        const jwt = api.getJWT();
+        if (jwt && userResp?.error?.message?.includes("Auth session missing")) {
+          console.log("[handleRecordingFileUpload] INCOGNITO FIX: JWT exists but Supabase session missing - attempting to restore session...");
+          
+          try {
+            // Try to restore Supabase session from JWT
+            await freshSupabase.auth.setSession({
+              access_token: jwt,
+              refresh_token: '' // We don't have refresh token in incognito, but access token might work
+            });
+            
+            // Re-check user after restoring session
+            const restoredUserResp = await freshSupabase.auth.getUser();
+            const restoredUser = restoredUserResp?.data?.user;
+            
+            console.log("[handleRecordingFileUpload] Session restore result:", {
+              success: !!restoredUser,
+              userId: restoredUser?.id,
+              email: maskEmailForLog(restoredUser?.email),
+              error: restoredUserResp?.error?.message
+            });
+            
+            // If restore worked, continue with the restored user
+            if (restoredUser) {
+              console.log("[handleRecordingFileUpload] Successfully restored Supabase session from JWT in incognito mode");
+              // Update variables and continue processing
+              user = restoredUser;
+              // Re-run the upload logic with restored user
+              return handleRecordingFileUpload(file);
+            }
+          } catch (restoreError) {
+            console.error("[handleRecordingFileUpload] Failed to restore session from JWT:", restoreError);
+            
+            // If session restore fails, it might be because the access token expired
+            // and we can't refresh it due to missing refresh token cookie in incognito
+            console.warn("[handleRecordingFileUpload] Likely cause: Access token expired and refresh token cookie unavailable in incognito mode");
+          }
+        }
+        
+        // Check if this is an incognito-specific issue
+        const isIncognito = await detectIncognitoMode();
+        const storageQuota = await getStorageQuota();
+        const cookiesWork = await testThirdPartyCookies();
+        
+        console.error("[handleRecordingFileUpload] No user found - incognito analysis:", {
+          isIncognito,
+          storageQuota,
+          cookiesWork,
+          cookieCount: document.cookie.split(';').length,
+          jwtPresent: !!jwt,
+          jwtLength: jwt?.length || 0,
+          refreshTokenCookieAvailable: cookiesWork && document.cookie.includes('sb-'),
+          localStorageAccessible: (() => {
+            try {
+              localStorage.setItem('test', 'test');
+              localStorage.removeItem('test');
+              return true;
+            } catch (e) {
+              return false;
+            }
+          })(),
+        });
+        
+        let errorMessage = "You must be logged in to upload recordings.";
+        if (isIncognito === 'localhost-incognito') {
+          errorMessage = "Your session has expired in incognito/private mode on localhost.\n\n" +
+                        "Note: Localhost has relaxed incognito restrictions, but session tokens may still expire. " +
+                        "Please log in again.";
+        } else if (isIncognito === true && jwt) {
+          errorMessage = "Your session has expired in incognito/private mode.\n\n" +
+                        "Incognito mode blocks the refresh token cookies needed to maintain long sessions. " +
+                        "Please log in again or use normal browsing mode for better session persistence.";
+        } else if (isIncognito === true) {
+          errorMessage += "\n\nIncognito/Private mode detected. This may cause authentication issues due to restricted cookies and storage.";
+        } else if (isIncognito === 'localhost-normal') {
+          errorMessage += "\n\nRunning on localhost with relaxed incognito restrictions.";
+        } else if (jwt && !user) {
+          errorMessage += "\n\nNote: Your login session appears to be active but browser storage is restricted. Try refreshing the page or using normal browsing mode.";
+        }
+        
         setCurrentStatus({ status: "error", message: "Not logged in" });
-        alert("You must be logged in to upload recordings.");
-        if (typeof api !== "undefined" && api.deleteJWT) api.deleteJWT();
+        alert(errorMessage);
+        api.deleteJWT();
         router.push("/login");
         return;
       }
@@ -685,7 +845,7 @@ export default function NewPatientEncounter() {
       let actualEmail = user.email;
       
       try {
-        const jwt = typeof api !== "undefined" && api.getJWT ? api.getJWT() : null;
+        const jwt = api.getJWT();
         if (jwt) {
           // Decode JWT to get the actual authenticated user
           const base64Url = jwt.split('.')[1];
@@ -755,7 +915,7 @@ export default function NewPatientEncounter() {
         setIsSaving(false);
         setCurrentStatus({ status: "error", message: "Invalid user session" });
         alert("Invalid user session. Please log in again.");
-        if (typeof api !== "undefined" && api.deleteJWT) api.deleteJWT();
+        api.deleteJWT();
         router.push("/login");
         return;
       }
