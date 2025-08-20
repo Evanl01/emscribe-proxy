@@ -579,8 +579,14 @@ export default function NewPatientEncounter() {
       setIsSaving(true);
 
       // Check current auth state with Supabase and log masked info for debugging
-      const userResp = await supabase.auth.getUser();
-      const sessionResp = await supabase.auth.getSession();
+      // Create a fresh client instance to avoid stale module-level state
+      const freshSupabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      );
+      
+      const userResp = await freshSupabase.auth.getUser();
+      const sessionResp = await freshSupabase.auth.getSession();
       const user = userResp?.data?.user || null;
 
       const maskEmailForLog = (email) => {
@@ -600,14 +606,29 @@ export default function NewPatientEncounter() {
       // Log summary (avoid printing full tokens/emails) to help debug multi-tab/session issues
       try {
         const jwt = typeof api !== "undefined" && api.getJWT ? api.getJWT() : null;
-        console.log("[handleRecordingFileUpload] supabase.getUser result:", {
+        const localStorageData = {
+          hasRecordingMetadata: !!localStorage.getItem(LS_KEYS.recordingFileMetadata),
+          authKeys: Object.keys(localStorage).filter(key => key.includes('auth') || key.includes('supabase')),
+        };
+        
+        console.log("[handleRecordingFileUpload] comprehensive auth state:", {
+          timestamp: new Date().toISOString(),
+          userAgent: navigator.userAgent.substring(0, 50) + "...",
+          origin: window.location.origin,
           hasUser: !!user,
+          userId: user?.id || null,
           maskedEmail: user ? maskEmailForLog(user.email) : null,
+          userResponseError: userResp?.error?.message || null,
           sessionExists: !!sessionResp?.data?.session,
+          sessionError: sessionResp?.error?.message || null,
           jwtPresent: !!jwt,
+          jwtLength: jwt ? jwt.length : 0,
+          localStorageState: localStorageData,
+          cookieCount: document.cookie.split(';').length,
+          tabId: Math.random().toString(36).substring(7), // Random tab identifier
         });
       } catch (e) {
-        console.log("[handleRecordingFileUpload] supabase.getUser logging failed", e);
+        console.log("[handleRecordingFileUpload] enhanced logging failed:", e);
       }
       // If no user is available in the client, stop and prompt for login
       if (!user) {
@@ -639,6 +660,14 @@ export default function NewPatientEncounter() {
       const filePath = `${user?.id || "anonymous"}/${fileName}`;
 
       // Attempt upload: try current client first, then refresh+retry once if necessary
+      // Also compare with fresh client to detect stale state issues
+      const freshClientUpload = freshSupabase.storage.from("audio-files");
+      console.log("[handleRecordingFileUpload] client comparison:", {
+        moduleClientId: supabase.supabaseKey?.substring(0, 10) + "...",
+        freshClientId: freshSupabase.supabaseKey?.substring(0, 10) + "...",
+        sameInstance: supabase === freshSupabase,
+      });
+      
       const uploadResult = await uploadWithTempClient(filePath, file);
 
       setIsSaving(false);
