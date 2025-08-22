@@ -8,6 +8,7 @@ import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPre
 import { set } from "zod";
 import no from "zod/v4/locales/no.cjs";
 import ExportDataAsFileMenu from "@/src/components/ExportDataAsFileMenu.jsx";
+import Auth from "@/src/components/Auth.jsx";
 
 function EditPatientEncounterInner() {
   const router = useRouter();
@@ -338,6 +339,7 @@ function EditPatientEncounterInner() {
   };
   return (
     <>
+      <Auth />
       <div className="max-w-8xl mx-auto p-6">
         {/* Title row with Export button on right */}
         <div className="flex items-center justify-between mb-8">

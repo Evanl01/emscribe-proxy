@@ -125,14 +125,15 @@ export default async function handler(req, res) {
                         return resolve();
                     }
 
-                    // Generate unique storage path
+                    // Generate unique filename and a storage path relative to the bucket
                     const uniqueName = `${user.email}-${Date.now()}-${Math.random().toString(36).substring(2, 15)}.${fileInfo.ext}`;
-                    const filePath = `audio-files/${uniqueName}`;
+                    // store files under a folder for the user to avoid collisions and make downloads predictable
+                    const filePath = `${user.id}/${uniqueName}`;
 
-                    // Upload to Supabase Storage
+                    // Upload to Supabase Storage using the path relative to the bucket root
                     const { data: storageData, error: storageError } = await supabase.storage
                         .from('audio-files')
-                        .upload(uniqueName, fileBuffer, {
+                        .upload(filePath, fileBuffer, {
                             contentType: fileInfo.mimetype,
                             upsert: false,
                         });
@@ -156,7 +157,7 @@ export default async function handler(req, res) {
 
                     if (dbError) {
                         // Clean up uploaded file if DB insert fails
-                        await supabase.storage.from('audio-files').remove([uniqueName]);
+                        await supabase.storage.from('audio-files').remove([filePath]);
                         responseSet = true;
                         res.status(400).json({ error: dbError.message });
                         return resolve();

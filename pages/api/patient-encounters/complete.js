@@ -166,17 +166,19 @@ export default async function handler(req, res) {
             const needNewSignedUrl = !patientEncounterData.recording_file_signed_url || new Date(patientEncounterData.recording_file_signed_url_expiry) < new Date();
             console.log('Step 4: Generating signed URL for audio file');
             if (recordingData.recording_file_path && needNewSignedUrl) {
-                // Remove 'audio-files/' prefix if present
-                if (recordingData.recording_file_path.startsWith('audio-files/')) {
-                    recordingData.recording_file_path = recordingData.recording_file_path.replace(/^audio-files\//, '');
+                // Normalize path: strip optional bucket prefix and any leading slash
+                let normalizedPath = recordingData.recording_file_path;
+                if (normalizedPath.startsWith('audio-files/')) {
+                    normalizedPath = normalizedPath.replace(/^audio-files\//, '');
                 }
-                console.log('Created signed URL for recording file:', recordingData.recording_file_path);
+                if (normalizedPath.startsWith('/')) normalizedPath = normalizedPath.slice(1);
+                console.log('Creating signed URL for recording file:', normalizedPath);
                 // Update signed URL and expiry in patientEncounter in supabase
                 const expirySeconds = 60 * 60;
 
                 const { data: signedUrlData, error: signedError } = await supabase.storage
                     .from('audio-files')
-                    .createSignedUrl(recordingData.recording_file_path, expirySeconds);
+                    .createSignedUrl(normalizedPath, expirySeconds);
                 if (signedError) {
                     console.error('Signed URL error:', signedError);
                     return res.status(500).json({ error: 'Failed to create signed URL: ' + signedError.message });

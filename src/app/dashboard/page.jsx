@@ -5,6 +5,7 @@ import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
 import * as validation from "@/public/scripts/validation.js";
+import Auth from "@/src/components/Auth";
 
 const Dashboard = () => {
   const router = useRouter();
@@ -250,6 +251,7 @@ const Dashboard = () => {
   // Render
   return (
     <>
+      <Auth />
       <div className="dashboard-container">
         {/* <div className="stats">
           <div>Transcripts: {Object.keys(transcripts).length}</div>

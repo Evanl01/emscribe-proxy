@@ -10,8 +10,8 @@ import { createClient } from "@supabase/supabase-js";
 import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPreviewOverlay";
 import { record, set } from "zod";
 import ExportDataAsFileMenu from "@/src/components/ExportDataAsFileMenu.jsx";
-
-const supabase = createClient(
+import Auth from "@/src/components/Auth.jsx";
+let supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
@@ -351,9 +351,9 @@ export default function NewPatientEncounter() {
     if (!validTypes.some((type) => file.type.includes(type))) {
       return "File must be in a supported audio format (MP3, WAV, WebM, OGG, MP4, M4A)";
     }
-    if (file.size > 30 * 1024 * 1024) {
-      // 30MB
-      return "File size must be less than 30MB";
+    if (file.size > 50 * 1024 * 1024) {
+      // 50MB
+      return "File size must be less than 50MB";
     }
     return null;
   };
@@ -416,6 +416,242 @@ export default function NewPatientEncounter() {
     });
   };
 
+  // Helper function to detect incognito/private browsing mode
+  const detectIncognitoMode = async () => {
+    try {
+      // Check if we're on localhost (browsers are more permissive with localhost in incognito)
+      const isLocalhost = window.location.hostname === 'localhost' || 
+                         window.location.hostname === '127.0.0.1' ||
+                         window.location.hostname.includes('localhost');
+      
+      // Test storage quota - incognito usually has very limited quota
+      if ('storage' in navigator && 'estimate' in navigator.storage) {
+        const estimate = await navigator.storage.estimate();
+        const quotaMB = estimate.quota / (1024 * 1024);
+        
+        // Localhost may have relaxed incognito restrictions
+        if (isLocalhost) {
+          // For localhost, also check for browser-specific incognito indicators
+          const isLikelyIncognito = quotaMB < 120 || 
+                                   (window.navigator && window.navigator.webdriver) ||
+                                   !window.indexedDB ||
+                                   window.navigator.temporaryStorage;
+          return isLikelyIncognito ? 'localhost-incognito' : false;
+        }
+        
+        // Production domains: standard incognito detection
+        return quotaMB < 120;
+      }
+      
+      
+      // Fallback: test localStorage persistence
+      const testKey = 'incognito-test-' + Math.random();
+      try {
+        localStorage.setItem(testKey, 'test');
+        localStorage.removeItem(testKey);
+        return isLocalhost ? 'localhost-normal' : false; // localStorage works normally
+      } catch (e) {
+        return true; // localStorage restricted
+      }
+    } catch (e) {
+      return null; // Unable to determine
+    }
+  };
+
+  // Helper to get storage quota information
+  const getStorageQuota = async () => {
+    try {
+      if ('storage' in navigator && 'estimate' in navigator.storage) {
+        const estimate = await navigator.storage.estimate();
+        return {
+          quota: Math.round(estimate.quota / (1024 * 1024)) + 'MB',
+          usage: Math.round(estimate.usage / (1024 * 1024)) + 'MB',
+          available: Math.round((estimate.quota - estimate.usage) / (1024 * 1024)) + 'MB'
+        };
+      }
+      return null;
+    } catch (e) {
+      return { error: e.message };
+    }
+  };
+
+  // Helper to test third-party cookie functionality
+  const testThirdPartyCookies = async () => {
+    try {
+      // Test if we can set a cookie
+      document.cookie = "test-cookie=test-value; SameSite=None; Secure";
+      const cookieSet = document.cookie.includes("test-cookie=test-value");
+      
+      // Clean up
+      document.cookie = "test-cookie=; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=None; Secure";
+      
+      return cookieSet;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Helper function to clear all auth-related storage when sessions get corrupted
+  const clearAllAuthState = async () => {
+    try {
+      // Clear Supabase sessions
+      await supabase.auth.signOut();
+      
+      // Clear localStorage entries
+      Object.keys(localStorage).forEach(key => {
+        if (key.includes('supabase') || key.includes('sb-') || key.includes('auth')) {
+          localStorage.removeItem(key);
+        }
+      });
+      
+      // Clear sessionStorage entries
+      Object.keys(sessionStorage).forEach(key => {
+        if (key.includes('supabase') || key.includes('sb-') || key.includes('auth')) {
+          sessionStorage.removeItem(key);
+        }
+      });
+      
+      // Clear API JWT
+      api.deleteJWT();
+
+      console.log("[clearAllAuthState] Cleared all authentication state");
+    } catch (e) {
+      console.error("[clearAllAuthState] Error clearing auth state:", e);
+    }
+  };
+
+  // Helper: call server refresh endpoint and return accessToken (or null)
+  const refreshAndGetAccessToken = async () => {
+    try {
+      const resp = await fetch("/api/auth/refresh", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!resp.ok) {
+        return null;
+      }
+      console.log("refreshAndGetAccessToken response:", resp);
+      const body = await resp.json();
+      return body?.accessToken || null;
+    } catch (e) {
+      console.error("refreshAndGetAccessToken error:", e);
+      return null;
+    }
+  };
+
+  // Helper: attempt upload with the current client first; on failure, refresh and retry once using a temporary client
+  const uploadWithTempClient = async (filePath, file) => {
+    // small helper to detect auth-like errors from Supabase client result.error
+    console.log("[uploadWithTempClient]: Before calling supabase.storage.upload. JWT:", api.getJWT());
+    const isAuthErrorFromSupabase = (err) => {
+      if (!err) return false;
+      // Supabase error objects can use different field names for HTTP status
+      const statusRaw = err.statusCode ?? err.status ?? err.status_code ?? err?.status;
+      const status = statusRaw ? Number(statusRaw) : null;
+      const message = (err?.message || err?.error || err?.msg || "")
+        .toString()
+        .toLowerCase();
+      console.log("Supabase error details:", { status, message, raw: err });
+
+      // Common auth-related HTTP statuses
+      if (status === 403) return true;
+
+      // Match common auth-related keywords in the message
+      if (/unauthoriz|authoriz|jwt|jws|token|session|access token/i.test(message)) return true;
+
+      return false;
+    };
+
+    // 1) Try with currently-initialized client (may be using anon key or already-authenticated client)
+    try {
+      console.log("Attempting upload with current Supabase client:", supabase);
+      const firstAttempt = await supabase.storage
+        .from("audio-files")
+        .upload(filePath, file, { upsert: false });
+
+      console.log("First attempt:", firstAttempt, "\nData:",firstAttempt.data);
+      // success
+      if (!firstAttempt.error && firstAttempt.data && firstAttempt.data.path) {
+        return { data: firstAttempt.data, error: null };
+      }
+
+      // If there's an error and it's NOT an auth error, throw it so caller handles it
+      if (firstAttempt.error && !isAuthErrorFromSupabase(firstAttempt.error)) {
+        // Throw the Supabase error object for caller
+        throw firstAttempt.error;
+      }
+
+      // Otherwise it's an auth-like error; fallthrough to refresh + retry
+      console.warn(
+        "Initial upload attempt failed and appears auth-related:",
+        firstAttempt.error
+      );
+    } catch (e) {
+      // If the thrown/caught exception is not an auth-like Supabase error, rethrow it
+      // (e may be a thrown Supabase error object or a thrown JS exception)
+      const maybeErrObj = e || {};
+      // If it's clearly an auth error, continue to refresh path; otherwise rethrow
+      if (!isAuthErrorFromSupabase(maybeErrObj)) {
+        console.warn("Initial upload threw non-auth error, rethrowing:", e);
+        throw e;
+      }
+      console.warn(
+        "Initial upload threw auth-like error, will attempt refresh and retry:",
+        e
+      );
+    }
+
+    // 2) Only for auth-like errors: Try refreshing access token and retry once with a temporary client
+    console.log("Attempting to refresh access token...");
+    const accessToken = await refreshAndGetAccessToken();
+    console.log("Access token after refresh:", accessToken);
+    if (!accessToken) {
+      // Caller should handle redirect to login
+      return {
+        data: null,
+        error: new Error("Session expired or refresh failed"),
+        requiresLogin: true,
+      };
+    }
+
+    try {
+      // Create a temporary supabase client for this upload only (do not mutate module-level client)
+      const tempSupabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+        {
+          global: { headers: { Authorization: `Bearer ${accessToken}` } },
+        }
+      );
+
+      const secondAttempt = await tempSupabase.storage
+        .from("audio-files")
+        .upload(filePath, file, { upsert: false });
+      console.log("Second attempt:", secondAttempt, "\nData:", secondAttempt.data);
+      if (secondAttempt.error) {
+        throw secondAttempt.error;
+      }
+      if (
+        !secondAttempt.error &&
+        secondAttempt.data &&
+        secondAttempt.data.path
+      ) {
+        return { data: secondAttempt.data, error: null };
+      }
+
+      // If retry failed, throw the error so caller can handle it
+
+      // Unexpected fallback
+      throw new Error(
+        "Upload failed on retry (unhandled error): " +
+          JSON.stringify(secondAttempt)
+      );
+    } catch (e) {
+      console.error("Retry upload threw or failed:", e);
+      throw e;
+    }
+  };
+
   // Handle file upload
   const handleRecordingFileUpload = async (file) => {
     if (!file) return;
@@ -446,17 +682,245 @@ export default function NewPatientEncounter() {
       });
       setIsSaving(true);
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      // Check current auth state with Supabase and log masked info for debugging
+      // Create a fresh client instance to avoid stale module-level state
+      const freshSupabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      );
+      
+      const userResp = await freshSupabase.auth.getUser();
+      const sessionResp = await freshSupabase.auth.getSession();
+      let user = userResp?.data?.user || null;
 
+      const maskEmailForLog = (email) => {
+        try {
+          if (!email || typeof email !== "string") return null;
+          const parts = email.split("@");
+          if (parts.length !== 2) return "***";
+          const local = parts[0];
+          const domain = parts[1];
+          const maskedLocal = local.length <= 2 ? local.replace(/./g, "*") : local[0] + local.slice(1, 2).replace(/./g, "*") + local.slice(-1);
+          return `${maskedLocal}@${domain}`;
+        } catch (e) {
+          return "***";
+        }
+      };
+
+      // Log summary (avoid printing full tokens/emails) to help debug multi-tab/session issues
+      try {
+        const jwt = api.getJWT();
+        const localStorageData = {
+          hasRecordingMetadata: !!localStorage.getItem(LS_KEYS.recordingFileMetadata),
+          authKeys: Object.keys(localStorage).filter(key => key.includes('auth') || key.includes('supabase')),
+        };
+        
+        console.log("[handleRecordingFileUpload] comprehensive auth state:", {
+          timestamp: new Date().toISOString(),
+          userAgent: navigator.userAgent.substring(0, 50) + "...",
+          origin: window.location.origin,
+          hasUser: !!user,
+          userId: user?.id || null,
+          maskedEmail: user ? maskEmailForLog(user.email) : null,
+          userResponseError: userResp?.error?.message || null,
+          sessionExists: !!sessionResp?.data?.session,
+          sessionError: sessionResp?.error?.message || null,
+          jwtPresent: !!jwt,
+          jwtLength: jwt ? jwt.length : 0,
+          localStorageState: localStorageData,
+          cookieCount: document.cookie.split(';').length,
+          tabId: Math.random().toString(36).substring(7), // Random tab identifier
+          // Add storage inspection to debug stale sessions
+          supabaseStorageKeys: Object.keys(localStorage).filter(key => 
+            key.includes('supabase') || key.includes('sb-')
+          ),
+          sessionStorageKeys: Object.keys(sessionStorage).filter(key => 
+            key.includes('supabase') || key.includes('sb-')
+          ),
+          // Add incognito/privacy mode detection
+          isIncognito: await detectIncognitoMode(),
+          cookieEnabled: navigator.cookieEnabled,
+          storageQuota: await getStorageQuota(),
+          thirdPartyCookies: await testThirdPartyCookies(),
+        });
+      } catch (e) {
+        console.log("[handleRecordingFileUpload] enhanced logging failed:", e);
+      }
+      // If no user is available in the client, stop and prompt for login
       if (!user) {
-        alert("You must be logged in to upload files.");
+        setIsSaving(false);
+        
+        // INCOGNITO FIX: Check if we have JWT but no Supabase session (split-brain auth)
+        const jwt = api.getJWT();
+        if (jwt && userResp?.error?.message?.includes("Auth session missing")) {
+          console.log("[handleRecordingFileUpload] INCOGNITO FIX: JWT exists but Supabase session missing - attempting to restore session...");
+          
+          try {
+            // Try to restore Supabase session from JWT
+            await freshSupabase.auth.setSession({
+              access_token: jwt,
+              refresh_token: '' // We don't have refresh token in incognito, but access token might work
+            });
+            
+            // Re-check user after restoring session
+            const restoredUserResp = await freshSupabase.auth.getUser();
+            const restoredUser = restoredUserResp?.data?.user;
+            
+            console.log("[handleRecordingFileUpload] Session restore result:", {
+              success: !!restoredUser,
+              userId: restoredUser?.id,
+              email: maskEmailForLog(restoredUser?.email),
+              error: restoredUserResp?.error?.message
+            });
+            
+            // If restore worked, continue with the restored user
+            if (restoredUser) {
+              console.log("[handleRecordingFileUpload] Successfully restored Supabase session from JWT in incognito mode");
+              // Update variables and continue processing
+              user = restoredUser;
+              // Re-run the upload logic with restored user
+              return handleRecordingFileUpload(file);
+            }
+          } catch (restoreError) {
+            console.error("[handleRecordingFileUpload] Failed to restore session from JWT:", restoreError);
+            
+            // If session restore fails, it might be because the access token expired
+            // and we can't refresh it due to missing refresh token cookie in incognito
+            console.warn("[handleRecordingFileUpload] Likely cause: Access token expired and refresh token cookie unavailable in incognito mode");
+          }
+        }
+        
+        // Check if this is an incognito-specific issue
+        const isIncognito = await detectIncognitoMode();
+        const storageQuota = await getStorageQuota();
+        const cookiesWork = await testThirdPartyCookies();
+        
+        console.error("[handleRecordingFileUpload] No user found - incognito analysis:", {
+          isIncognito,
+          storageQuota,
+          cookiesWork,
+          cookieCount: document.cookie.split(';').length,
+          jwtPresent: !!jwt,
+          jwtLength: jwt?.length || 0,
+          refreshTokenCookieAvailable: cookiesWork && document.cookie.includes('sb-'),
+          localStorageAccessible: (() => {
+            try {
+              localStorage.setItem('test', 'test');
+              localStorage.removeItem('test');
+              return true;
+            } catch (e) {
+              return false;
+            }
+          })(),
+        });
+        
+        let errorMessage = "You must be logged in to upload recordings.";
+        if (isIncognito === 'localhost-incognito') {
+          errorMessage = "Your session has expired in incognito/private mode on localhost.\n\n" +
+                        "Note: Localhost has relaxed incognito restrictions, but session tokens may still expire. " +
+                        "Please log in again.";
+        } else if (isIncognito === true && jwt) {
+          errorMessage = "Your session has expired in incognito/private mode.\n\n" +
+                        "Incognito mode blocks the refresh token cookies needed to maintain long sessions. " +
+                        "Please log in again or use normal browsing mode for better session persistence.";
+        } else if (isIncognito === true) {
+          errorMessage += "\n\nIncognito/Private mode detected. This may cause authentication issues due to restricted cookies and storage.";
+        } else if (isIncognito === 'localhost-normal') {
+          errorMessage += "\n\nRunning on localhost with relaxed incognito restrictions.";
+        } else if (jwt && !user) {
+          errorMessage += "\n\nNote: Your login session appears to be active but browser storage is restricted. Try refreshing the page or using normal browsing mode.";
+        }
+        
+        setCurrentStatus({ status: "error", message: "Not logged in" });
+        alert(errorMessage);
+        api.deleteJWT();
         router.push("/login");
         return;
       }
 
-      const userEmail = user.email;
+      console.log("Current user:", { id: user.id, maskedEmail: maskEmailForLog(user.email) });
+      
+      // CRITICAL FIX: Get user info from JWT instead of frontend client to avoid auth mismatch
+      let actualUser = user;
+      let actualEmail = user.email;
+      
+      try {
+        const jwt = api.getJWT();
+        if (jwt) {
+          // Decode JWT to get the actual authenticated user
+          const base64Url = jwt.split('.')[1];
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+          }).join(''));
+          const jwtPayload = JSON.parse(jsonPayload);
+          
+          console.log("[handleRecordingFileUpload] JWT user vs Frontend user:", {
+            frontendUserId: user.id,
+            frontendEmail: maskEmailForLog(user.email),
+            jwtUserId: jwtPayload.sub,
+            jwtEmail: maskEmailForLog(jwtPayload.email),
+            mismatch: user.id !== jwtPayload.sub || user.email !== jwtPayload.email
+          });
+          
+          // If there's a mismatch, try to refresh the Supabase client session
+          if (user.id !== jwtPayload.sub || user.email !== jwtPayload.email) {
+            console.warn("[handleRecordingFileUpload] CRITICAL: Auth state mismatch detected! Attempting to refresh Supabase session...");
+            
+            try {
+              // Force session refresh by setting the session from JWT
+              await freshSupabase.auth.setSession({
+                access_token: jwt,
+                refresh_token: sessionResp?.data?.session?.refresh_token || ''
+              });
+              
+              // Re-check user after setting session
+              const refreshedUserResp = await freshSupabase.auth.getUser();
+              const refreshedUser = refreshedUserResp?.data?.user;
+              
+              console.log("[handleRecordingFileUpload] Session refresh result:", {
+                success: !!refreshedUser,
+                newUserId: refreshedUser?.id,
+                newEmail: maskEmailForLog(refreshedUser?.email),
+                matchesJWT: refreshedUser?.id === jwtPayload.sub
+              });
+              
+              // If refresh worked, update our user reference
+              if (refreshedUser && refreshedUser.id === jwtPayload.sub) {
+                console.log("[handleRecordingFileUpload] Successfully synchronized Supabase session with JWT");
+                // Update the module-level client too
+                await supabase.auth.setSession({
+                  access_token: jwt,
+                  refresh_token: sessionResp?.data?.session?.refresh_token || ''
+                });
+              }
+            } catch (refreshError) {
+              console.error("[handleRecordingFileUpload] Failed to refresh Supabase session:", refreshError);
+            }
+          }
+          
+          // Use JWT user data for file operations to match server expectations
+          if (jwtPayload.sub && jwtPayload.email) {
+            actualUser = { id: jwtPayload.sub, email: jwtPayload.email };
+            actualEmail = jwtPayload.email;
+            console.log("[handleRecordingFileUpload] Using JWT user for consistency");
+          }
+        }
+      } catch (e) {
+        console.warn("[handleRecordingFileUpload] Failed to decode JWT, using frontend user:", e);
+      }
+
+      // Double-check that we have valid user data before proceeding
+      if (!actualUser?.id || !actualEmail) {
+        setIsSaving(false);
+        setCurrentStatus({ status: "error", message: "Invalid user session" });
+        alert("Invalid user session. Please log in again.");
+        api.deleteJWT();
+        router.push("/login");
+        return;
+      }
+
+      const userEmail = actualEmail;
 
       // Get extension from uploaded file name
       const originalName = file.name || "audio";
@@ -468,19 +932,46 @@ export default function NewPatientEncounter() {
       )
         .toString()
         .padStart(2, "0")}${extension ? `.${extension}` : ""}`;
-      const filePath = `${user?.id || "anonymous"}/${fileName}`;
+      console.log("[handleRecordingFileUpload] constructed filename/path:", {
+        fileName,
+        filePath: `${actualUser?.id || "anonymous"}/${fileName}`,
+        usingJwtUser: actualUser !== user,
+      });
+      const filePath = `${actualUser?.id || "anonymous"}/${fileName}`;
 
-      const { data, error } = await supabase.storage
-        .from("audio-files")
-        .upload(filePath, file, { upsert: false });
+      // Attempt upload: try current client first, then refresh+retry once if necessary
+      // Also compare with fresh client to detect stale state issues
+      const freshClientUpload = freshSupabase.storage.from("audio-files");
+      console.log("[handleRecordingFileUpload] client comparison:", {
+        moduleClientId: supabase.supabaseKey?.substring(0, 10) + "...",
+        freshClientId: freshSupabase.supabaseKey?.substring(0, 10) + "...",
+        sameInstance: supabase === freshSupabase,
+      });
+      
+      const uploadResult = await uploadWithTempClient(filePath, file);
 
       setIsSaving(false);
 
-      if (error) {
-        setCurrentStatus({ status: "error", message: error.message });
-        alert("Error uploading to Supabase: " + error.message);
+      if (uploadResult?.requiresLogin) {
+        alert("Session expired. Please log in again.");
+        api.deleteJWT();
+        router.push("/login");
         return;
       }
+
+      const { data, error } = uploadResult;
+
+      if (error || !data || !data?.path) {
+        setCurrentStatus({
+          status: "error",
+          message: error?.message || "Upload failed",
+        });
+        alert(
+          "Error uploading to Supabase: " + (error?.message || String(error))
+        );
+        return;
+      }
+
       // Clear old recording file from localStorage and reset local variables
       localStorage.removeItem(LS_KEYS.recordingFile);
       localStorage.removeItem(LS_KEYS.recordingFileMetadata);
@@ -728,7 +1219,7 @@ export default function NewPatientEncounter() {
 
         // Now proceed with the API call using recording_file_path
         const payload = { recording_file_path: recording_file_path };
-        const response = await fetch("/api/prompt-llm", {
+        const response = await api.fetchWithRefresh("/api/prompt-llm", {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${api.getJWT()}`,
@@ -863,10 +1354,7 @@ export default function NewPatientEncounter() {
                         LS_KEYS.patientEncounterName,
                         patientEncounterName
                       );
-                      localStorage.setItem(
-                        LS_KEYS.transcript,
-                        transcript
-                      );
+                      localStorage.setItem(LS_KEYS.transcript, transcript);
                       localStorage.setItem(
                         LS_KEYS.soapSubjective,
                         soapSubjectiveText
@@ -879,10 +1367,7 @@ export default function NewPatientEncounter() {
                         LS_KEYS.soapAssessment,
                         soapAssessmentText
                       );
-                      localStorage.setItem(
-                        LS_KEYS.soapPlan,
-                        soapPlanText
-                      );
+                      localStorage.setItem(LS_KEYS.soapPlan, soapPlanText);
                       localStorage.setItem(
                         LS_KEYS.billingSuggestion,
                         billingText.trim()
@@ -1023,15 +1508,18 @@ export default function NewPatientEncounter() {
       };
 
       console.log("Saving patient encounter with data:", payload);
-      const response = await fetch("/api/patient-encounters/complete", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${api.getJWT()}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-        cache: "no-store", // Always fetch fresh data, never use cache
-      });
+      const response = await api.fetchWithRefresh(
+        "/api/patient-encounters/complete",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${api.getJWT()}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+          cache: "no-store", // Always fetch fresh data, never use cache
+        }
+      );
       console.log("Save response:", response);
 
       if (!response.ok) {
@@ -1085,6 +1573,7 @@ export default function NewPatientEncounter() {
 
   return (
     <>
+      <Auth />
       <div className="max-w-8xl mx-auto p-6">
         <h1 className="text-3xl font-bold mb-8">New Patient Encounter</h1>
 
@@ -1126,7 +1615,7 @@ export default function NewPatientEncounter() {
                       <div className="text-4xl mb-2">📁</div>
                       <div>Click to upload audio file</div>
                       <div className="text-sm text-gray-500 mt-2">
-                        Max 30MB, 40 minutes duration
+                        Max 50MB, 30 minutes duration
                         <br />
                         Supports MP3, WAV, WebM, OGG, MP4, M4A
                       </div>
@@ -1465,7 +1954,7 @@ export default function NewPatientEncounter() {
                             objective: soapObjective,
                             assessment: soapAssessment,
                             plan: soapPlan,
-                          }
+                          },
                         },
                       },
                     ]}

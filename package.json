@@ -12,6 +12,7 @@
     "@aws-sdk/client-comprehendmedical": "^3.864.0",
     "@supabase/supabase-js": "^2.52.0",
     "busboy": "^1.6.0",
+    "cookie": "^1.0.2",
     "docx": "^9.5.1",
     "file-saver": "^2.0.5",
     "formidable": "^3.5.4",
