@@ -60,11 +60,12 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
         messages: [
             {
                 role: "system",
-                content: "You are a clinical documentation assistant trained to generate SOAP notes from detailed patient encounters. Your output must be accurate and avoid omitting important clinical details. But only output data if present in the transcript, otherwise leave it blank."
+                content: "You are a clinical documentation assistant trained to generate SOAP notes from detailed patient encounters. Your output must be accurate and avoid omitting important clinical details. But only output data if present in the transcript, otherwise leave it blank. '•' is invalid symbol never use it."
             },
             {
                 role: "user",
-                content: `Here is a patient encounter transcript:\n\n${transcript}\n\nGenerate SOAP note and billing suggestions. Use bullet points and markdown formatting and "\\n"for clarity.`
+                content: `Here is a patient encounter transcript:\n\n${transcript}\n\nGenerate SOAP note and billing suggestions. PHI information has been masked for privacy, e.g. Evan is 13 years old --> {{NAME_1}} is {{AGE_2}} years old.
+                Use bullet points (marked by '-' symbols, '•' is invalid symbol) and markdown formatting and "\\n"for clarity.`
             }
         ],
         max_completion_tokens: 10000,
