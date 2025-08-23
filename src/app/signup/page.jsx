@@ -5,12 +5,8 @@ import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
 import * as validation from "@/public/scripts/validation.js";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-);
+// NOTE: Use the backend API to perform sign-up to avoid exposing client behavior
+// and to centralize handling (prevents email enumeration and keeps refresh cookie logic server-side).
 
 export default function SignupPage() {
   const [email, setEmail] = useState("");
@@ -28,26 +24,37 @@ export default function SignupPage() {
     }
     setLoading(true);
     try {
-      // Use Supabase Auth for client-side authentication
-      const { data, error } = await supabase.auth.signUp({
-        email: email,
-        password: password,
+      // Call our backend endpoint which wraps Supabase and intentionally returns
+      // a neutral response to avoid indicating whether an email already exists.
+      const resp = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sign-up', email, password })
       });
-      console.log("Sign-up data:", data);
-      if (!data.session) {
-        // Check if email exists and is confirmed
-        router.push("/login");
-        throw new Error(
-          "Account created. Check your email for confirmation link. If you don't receive it, proceed to login."
-        );
+      const body = await resp.json().catch(() => ({}));
+
+      if (!resp.ok) {
+        // Real errors (validation/network/server) are surfaced to the user.
+        setError(body?.error || 'Signup failed. Please try again.');
+        return;
       }
-      console.log("Sign-up data:", await response.json());
-      setLoading(false);
-      router.push("/authentication");
+
+      // Persist email in sessionStorage so the confirm page can auto-fill the
+      // resend flow without requiring the user to re-type their address.
+      try {
+        sessionStorage.setItem('confirm_email', email);
+      } catch (e) {
+        // ignore storage errors
+      }
+
+      // Always show a neutral message and route to a page that instructs the user
+      // to check their email. This prevents leaking whether the email already
+      // exists in the system.
+      router.push('/confirm-email');
       return;
     } catch (err) {
-      alert(err.message);
-      // setError(err.message);
+      // Network or unexpected errors
+      setError(err?.message || 'Network error during signup');
     } finally {
       setLoading(false);
     }

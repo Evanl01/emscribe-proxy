@@ -27,28 +27,32 @@ export default function LoginPage() {
       return;
     }
     setLoading(true);
-    try {
+      try {
       // Sign in via server so it can persist the refresh token and set HttpOnly cookie
+      // Request HTML/browser behavior so server sets HttpOnly secure cookie. Mobile clients should use Accept: application/json
       const resp = await fetch('/api/auth', {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'text/html' },
         body: JSON.stringify({ action: 'sign-in', email, password }),
       });
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({}));
         throw new Error(body?.error || `Sign-in failed (${resp.status})`);
       }
-      const body = await resp.json();
+      const body = await resp.json().catch(() => ({}));
       // debug: surface whether server attempted to set refresh cookie
       try {
         console.debug('server sign-in response', { cookieSet: body.cookieSet, status: resp.status });
       } catch (e) {}
       // Server may return token as a plain string or as an object { access_token }
+      // Server may return different shapes:
+      // - Browser flow (Accept: text/html) -> server sets HttpOnly refresh cookie and returns { token: safeSession }
+      // - Mobile flow (Accept: application/json) -> server returns { access_token, refresh_token }
       const jwt =
         typeof body?.token === 'string'
           ? body.token
-          : body?.token?.access_token || body?.token?.accessToken || null;
+          : body?.access_token || body?.token?.access_token || body?.token?.accessToken || null;
       if (!jwt) {
         // Try other shapes: some flows return token.access_token inside token
         throw new Error('No access token returned from server sign-in');

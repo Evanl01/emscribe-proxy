@@ -26,200 +26,23 @@ export const config = {
     },
 };
 
-export default async function handler(req, res) {
-    // Authenticate user for all methods
-    const supabase = getSupabaseClient(req.headers.authorization);
-    const { user, error: authError } = await authenticateRequest(req);
-    if (authError) return sendApiError(res, 401, 'auth_error', authError);
 
-    if (req.method !== 'POST') {
-        return sendApiError(res, 405, 'method_not_allowed', 'Method not allowed');
-    }
-    // Start timer
-    // Set up SSE headers for progress updates
-    res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type',
-    });
-
-    try {
-        // Send immediate acknowledgment
-        response.status = 'started';
-        response.message = 'Processing started...';
-        res.write(`data: ${JSON.stringify(response)}\n\n`);
-
-        // Expect JSON body with recording_file_path
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        await new Promise(resolve => req.on('end', resolve));
-        let recording_file_path;
-        try {
-            const parsed = JSON.parse(body);
-            recording_file_path = parsed.recording_file_path;
-        } catch (e) {
-            sendSseError(res, 400, 'Invalid JSON body or missing recording_file_path');
-            return;
-        }
-        if (!recording_file_path) {
-            sendSseError(res, 400, 'recording_file_path is required');
-            return;
-        }
-
-        response.status = 'downloading';
-        response.message = 'Downloading audio file from Supabase Storage...';
-        res.write(`data: ${JSON.stringify(response)}\n\n`);
-        const expirySeconds = 60 * 60;
-        const { data: signedUrlData, error: signedError } = await supabase.storage
-            .from('audio-files')
-            .createSignedUrl(recording_file_path, expirySeconds);
-        if (signedError) {
-            console.error('Signed URL error:', signedError);
-            return sendApiError(res, 500, 'signed_url_error', 'Failed to create signed URL: ' + signedError.message);
-        }
-        const recording_file_signed_url = signedUrlData.signedUrl;
-
-        // Transcribe audio using cloud GCP and mask with AWS Comprehend medical
-        response.status = 'transcribe and mask';
-        response.message = 'Transcribing audio and masking PHI...';
-        res.write(`data: ${JSON.stringify(response)}\n\n`);
-
-        // Transcribe audio using cloud GCP and mask with AWS Comprehend medical
-        let transcriptResult;
-        const start_time = new Date().toISOString();
-        console.log("[transcribe_and_mask] Start time: ", start_time);
-        try {
-            transcriptResult = await transcribe_and_mask({ recording_file_signed_url, req, user });
-        }
-        catch (error) {
-            // Log full error + stack so backend logs show root cause
-            console.error('transcribe_and_mask error:', error?.message || error);
-            console.error(error?.stack || error);
-            sendSseError(res, 500,  `Transcription failed: ${error?.message || 'Unknown error'}`);
-            return;
-        }
-        // const transcriptResult = await geminiAPIReq(transcriptReqBody).catch(error => {
-        //     response.status = 'error';
-        //     response.message = `Transcription failed: ${error.message}`;
-        //     res.write(`data: ${JSON.stringify(response)}\n\n`);
-        //     res.end();
-        //     return;
-        // });
-        if (!transcriptResult || !transcriptResult.cloudRunData?.transcript || !transcriptResult.maskResult?.masked_transcript || !transcriptResult.maskResult?.phi_entities) {
-            // response.status = 'error';
-            // response.message = 'Transcription result is empty or invalid';
-            console.error('Transcription result is missing expected properties:', transcriptResult);
-            return sendApiError(res, 400, 'transcription_invalid', 'Failed to create transcript. Please try again.');
-        }
-        const transcript = transcriptResult.cloudRunData.transcript;
-        const maskedTranscript = transcriptResult.maskResult.masked_transcript;
-        const phiEntities = transcriptResult.maskResult.phi_entities;
-        const transcribe_end_time = new Date().toISOString();
-        console.log('[transcribe_and_mask] Total time: ', transcribe_end_time - start_time);
-        console.log('Transcription Result:', transcriptResult);
-
-        response.status = 'transcription complete';
-        response.message = 'Transcription complete!';
-        // Send message, with additional 'data' field for transcript
-        res.write(`data: ${JSON.stringify({ ...response, data: { transcript } })}\n\n`);
-
-        // Create SOAP Note and Billing Suggestion request body
-        response.status = 'creating soap note';
-        response.message = 'Creating SOAP note and billing suggestion...';
-        res.write(`data: ${JSON.stringify(response)}\n\n`);
-
-        // Create SOAP Note and Billing Suggestion using OpenAI API
-        const soapNoteAndBillingReqBody = gptRequestBodies.getSoapNoteAndBillingRequestBody(maskedTranscript);
-        let soapNoteAndBillingResultRaw;
-        try {
-            soapNoteAndBillingResultRaw = await gptAPIReq(soapNoteAndBillingReqBody);
-        } catch (error) {
-            sendSseError(res, 500, `SOAP Note processing failed: ${error.message}`);
-            return;
-        }
-
-        if (!soapNoteAndBillingResultRaw) {
-            const error = 'soap empty response'
-            console.error(error, soapNoteAndBillingResultRaw);
-            sendSseError(res, 500, `Failed to create SOAP note and billing suggestion. Empty response from LLM.`);
-            return;
-        }
-        console.log('SOAP Note and Billing Suggestion Result Raw:', soapNoteAndBillingResultRaw);
-
-        let soapNoteAndBillingResultUnmasked;
-        try {
-            // Unmask any PHI tokens in the raw string before parsing
-            soapNoteAndBillingResultUnmasked = unmask_phi(soapNoteAndBillingResultRaw, phiEntities);
-        }
-        catch (err){
-            console.error('Failed to unmask PHI tokens:', err);
-            sendSseError(res, 500, `Failed to unmask PHI tokens: ${err.message}`);
-            return;
-        }
-        // Try to parse LLM response as JSON (some LLMs return stringified JSON)
-        // Prepare raw string for validation/unmasking: if LLM returned an object, stringify it
-        let rawString;
-        if (typeof soapNoteAndBillingResultRaw === 'string') {
-            rawString = soapNoteAndBillingResultRaw;
-        } else {
-            try {
-                rawString = JSON.stringify(soapNoteAndBillingResultRaw);
-            } catch (err) {
-                console.error('Failed to stringify LLM object response:', err, soapNoteAndBillingResultRaw);
-                sendSseError(res, 500, `Failed to convert LLM response to string: ${err.message}`);
-                return;
-            }
-        }
-
-        // Quick format validation before unmasking: ensure it looks like a JSON object containing expected keys
-        const looksLikeJson = rawString.trim().startsWith('{');
-        const hasKeys = rawString.includes('soap_note') && rawString.includes('billing');
-        if (!looksLikeJson || !hasKeys) {
-            console.error('LLM response failed basic format check:', rawString.slice(0, 400));
-            sendSseError(res, 500, `LLM response does not appear to be the expected JSON structure`);
-            return;
-        }
-
-        // Unmask any PHI tokens in the raw string before parsing
-        let unmaskRes;
-        try {
-            unmaskRes = unmask_phi(rawString, phiEntities || []);
-        } catch (err) {
-            console.error('Failed to unmask PHI tokens:', err);
-            sendSseError(res, 500, `Failed to unmask PHI tokens: ${err.message}`);
-            return;
-        }
-
-        const unmaskedString = (unmaskRes && typeof unmaskRes === 'object' && unmaskRes.unmasked_transcript)
-            ? unmaskRes.unmasked_transcript
-            : String(unmaskRes || rawString);
-
-        // Parse the unmasked string into JSON
-        let soapNoteAndBillingResult;
-        try {
-            soapNoteAndBillingResult = JSON.parse(unmaskedString);
-        } catch (err) {
-            console.error('Failed to parse LLM response as JSON after unmasking:', err, { unmaskedString });
-            sendSseError(res, 500, `Failed to parse SOAP note response as JSON: ${err.message}`);
-            return;
-        }
-        const end_time = new Date().toISOString();
-        console.log('{/prompt-llm} Total time: ', end_time - start_time);
-
-        response.status = 'soap note complete';
-        response.message = 'SOAP note and billing suggestion created successfully!';
-        res.write(`data: ${JSON.stringify({ ...response, data: soapNoteAndBillingResult })}\n\n`);
-        res.end();
-
-    } catch (error) {
-        console.error('Processing error:', error);
-        response.status = 'error';
-        response.message = `Processing failed: ${error.message}`;
-        res.write(`data: ${JSON.stringify(response)}\n\n`);
-        res.end();
-    }
+// Helper: clean raw text from LLMs to normalize problematic characters
+function cleanRawText(s) {
+    if (!s || typeof s !== 'string') return s;
+    // Replace common bullet characters with a dash
+    s = s.replace(/\u2022|\u2023|\u25E6|\u2043/g, '-');
+    // Replace various ellipsis and similar with standard ellipsis
+    s = s.replace(/[\u2026\u22EF\u22EE]/g, '...');
+    // Normalize non-breaking spaces to regular space
+    s = s.replace(/\u00A0/g, ' ');
+    // Remove control characters except common whitespace (tab, newline, carriage)
+    s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    // Collapse multiple consecutive hyphens to a single one
+    s = s.replace(/-{2,}/g, '-');
+    // Trim excessive whitespace
+    s = s.replace(/\s{2,}/g, ' ').trim();
+    return s;
 }
 
 
@@ -294,50 +117,6 @@ async function gptAPIReq(reqBody) {
     return openaiData.choices[0].message.content;
 }
 
-
-// // Process B: Upload to Supabase Storage and save record to database
-// async function uploadAndSaveRecord(audioBuffer, storagePath, userId, fileName) {
-//     //
-
-//     // Upload to Supabase Storage
-//     const { data: uploadData, error: uploadError } = await supabase.storage
-//         .from('audio-files')
-//         .upload(fileName, audioBuffer, {
-//             contentType: 'audio/mp3',
-//             upsert: false
-//         });
-
-//     if (uploadError) {
-//         throw new Error(`Storage upload failed: ${uploadError.message}`);
-//     }
-//     //create recording object using recordingSchema
-//     const parseResult = recordingSchema.safeParse({ recording_file_path: uploadData.fullPath, name: fileName, user_id: userId });
-//     if (!parseResult.success) {
-//         throw new Error(`Schema validation failed: ${parseResult.error.errors.map(e => e.message).join(', ')}`);
-//     }
-//     const recording = parseResult.data;
-//     // Save record to database
-
-//     const { data: recordData, error: dbError } = await supabase
-//         .from(recordingTableName)
-//         .insert([recording])
-//         .select()
-//         .single();
-
-//     console.log('Record Data:', recordData);
-//     if (dbError) {
-//         // No need to delete the file here, as the upload will be cleaned up in the ACID main handler
-//         // await supabase.storage
-//         //     .from('audio-files')
-//         //     .remove([fileName])
-//         //     .catch(console.error);
-
-//         throw new Error(`Database save failed: ${dbError.message}`);
-//     }
-
-//     return { uploadData, recordData };
-// }
-
 // Basic runtime validator for the expected soap_and_billing JSON schema.
 function validateSoapAndBilling(obj) {
     if (!obj || typeof obj !== 'object') throw new Error('Response is not an object');
@@ -375,4 +154,203 @@ function validateSoapAndBilling(obj) {
     if (b.icd10_codes.length > 10) throw new Error('billing.icd10_codes has too many entries');
 
     return true;
+}
+
+export default async function handler(req, res) {
+    // Authenticate user for all methods
+    const supabase = getSupabaseClient(req.headers.authorization);
+    const { user, error: authError } = await authenticateRequest(req);
+    if (authError) return sendApiError(res, 401, 'auth_error', authError);
+
+    if (req.method !== 'POST') {
+        return sendApiError(res, 405, 'method_not_allowed', 'Method not allowed');
+    }
+    // Start timer
+    // Set up SSE headers for progress updates
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+    });
+
+    try {
+        // Send immediate acknowledgment
+        response.status = 'started';
+        response.message = 'Processing started...';
+        res.write(`data: ${JSON.stringify(response)}\n\n`);
+
+        // Expect JSON body with recording_file_path
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        await new Promise(resolve => req.on('end', resolve));
+        let recording_file_path;
+        try {
+            const parsed = JSON.parse(body);
+            recording_file_path = parsed.recording_file_path;
+        } catch (e) {
+            sendSseError(res, 400, 'Invalid JSON body or missing recording_file_path');
+            return;
+        }
+        if (!recording_file_path) {
+            sendSseError(res, 400, 'recording_file_path is required');
+            return;
+        }
+
+        response.status = 'downloading';
+        response.message = 'Downloading audio file from Supabase Storage...';
+        res.write(`data: ${JSON.stringify(response)}\n\n`);
+        const expirySeconds = 60 * 60;
+        const { data: signedUrlData, error: signedError } = await supabase.storage
+            .from('audio-files')
+            .createSignedUrl(recording_file_path, expirySeconds);
+        if (signedError) {
+            console.error('Signed URL error:', signedError);
+            return sendApiError(res, 500, 'signed_url_error', 'Failed to create signed URL: ' + signedError.message);
+        }
+        const recording_file_signed_url = signedUrlData.signedUrl;
+
+        // Transcribe audio using cloud GCP and mask with AWS Comprehend medical
+        response.status = 'transcribe and mask';
+        response.message = 'Transcribing audio and masking PHI...';
+        res.write(`data: ${JSON.stringify(response)}\n\n`);
+        // Transcribe audio using cloud GCP and mask with AWS Comprehend medical
+        let transcriptResult;
+        const start_time = new Date().toISOString();
+        console.log("[transcribe_and_mask] Start time: ", start_time);
+        try {
+            transcriptResult = await transcribe_and_mask({ recording_file_signed_url, req, user });
+        }
+        catch (error) {
+            // Log full error + stack so backend logs show root cause
+            console.error('transcribe_and_mask error:', error?.message || error);
+            console.error(error?.stack || error);
+            sendSseError(res, 500,  `Transcription failed: ${error?.message || 'Unknown error'}`);
+            return;
+        }
+        // const transcriptResult = await geminiAPIReq(transcriptReqBody).catch(error => {
+        //     response.status = 'error';
+        //     response.message = `Transcription failed: ${error.message}`;
+        //     res.write(`data: ${JSON.stringify(response)}\n\n`);
+        //     res.end();
+        //     return;
+        // });
+        if (!transcriptResult || !transcriptResult.cloudRunData?.transcript || !transcriptResult.maskResult?.masked_transcript || !transcriptResult.maskResult?.phi_entities) {
+            // response.status = 'error';
+            // response.message = 'Transcription result is empty or invalid';
+            console.error('Transcription result is missing expected properties:', transcriptResult);
+            return sendApiError(res, 400, 'transcription_invalid', 'Failed to create transcript. Please try again.');
+        }
+        const transcript = transcriptResult.cloudRunData.transcript;
+        const maskedTranscript = transcriptResult.maskResult.masked_transcript;
+        const phiEntities = transcriptResult.maskResult.phi_entities;
+        const transcribe_end_time = new Date().toISOString();
+        console.log('[transcribe_and_mask] Total time: ', (transcribe_end_time - start_time)/1000, 's');
+        console.log('Transcription Result:', transcriptResult);
+
+        response.status = 'transcription complete';
+        response.message = 'Transcription complete!';
+        // Send message, with additional 'data' field for transcript
+        res.write(`data: ${JSON.stringify({ ...response, data: { transcript } })}\n\n`);
+
+        // Create SOAP Note and Billing Suggestion request body
+        response.status = 'creating soap note';
+        response.message = 'Creating SOAP note and billing suggestion...';
+        res.write(`data: ${JSON.stringify(response)}\n\n`);
+
+        // Create SOAP Note and Billing Suggestion using OpenAI API
+        const soapNoteAndBillingReqBody = gptRequestBodies.getSoapNoteAndBillingRequestBody(maskedTranscript);
+        let soapNoteAndBillingResultRaw;
+        try {
+            soapNoteAndBillingResultRaw = await gptAPIReq(soapNoteAndBillingReqBody);
+        } catch (error) {
+            sendSseError(res, 500, `SOAP Note processing failed: ${error.message}`);
+            return;
+        }
+
+        if (!soapNoteAndBillingResultRaw) {
+            const error = 'soap empty response'
+            console.error(error, soapNoteAndBillingResultRaw);
+            sendSseError(res, 500, `Failed to create SOAP note and billing suggestion. Empty response from LLM.`);
+            return;
+        }
+        console.log('SOAP Note and Billing Suggestion Result Raw:', soapNoteAndBillingResultRaw);
+
+        let soapNoteAndBillingResultUnmasked;
+        try {
+            // Clean then unmask any PHI tokens in the raw string before parsing
+            const cleanedSoapRaw = typeof soapNoteAndBillingResultRaw === 'string'
+                ? cleanRawText(soapNoteAndBillingResultRaw)
+                : cleanRawText(JSON.stringify(soapNoteAndBillingResultRaw));
+            soapNoteAndBillingResultUnmasked = unmask_phi(cleanedSoapRaw, phiEntities);
+        } catch (err) {
+            console.error('Failed to unmask PHI tokens:', err);
+            sendSseError(res, 500, `Failed to unmask PHI tokens: ${err.message}`);
+            return;
+        }
+        // Try to parse LLM response as JSON (some LLMs return stringified JSON)
+        // Prepare raw string for validation/unmasking: if LLM returned an object, stringify it
+        let rawString;
+        if (typeof soapNoteAndBillingResultRaw === 'string') {
+            rawString = soapNoteAndBillingResultRaw;
+        } else {
+            try {
+                rawString = JSON.stringify(soapNoteAndBillingResultRaw);
+            } catch (err) {
+                console.error('Failed to stringify LLM object response:', err, soapNoteAndBillingResultRaw);
+                sendSseError(res, 500, `Failed to convert LLM response to string: ${err.message}`);
+                return;
+            }
+        }
+
+        // Quick format validation before unmasking: ensure it looks like a JSON object containing expected keys
+        const looksLikeJson = rawString.trim().startsWith('{');
+        const hasKeys = rawString.includes('soap_note') && rawString.includes('billing');
+        if (!looksLikeJson || !hasKeys) {
+            console.error('LLM response failed basic format check:', rawString.slice(0, 400));
+            sendSseError(res, 500, `LLM response does not appear to be the expected JSON structure`);
+            return;
+        }
+
+        // Clean rawString then unmask any PHI tokens in the raw string before parsing
+        rawString = cleanRawText(rawString);
+        let unmaskRes;
+        try {
+            unmaskRes = unmask_phi(rawString, phiEntities || []);
+        } catch (err) {
+            console.error('Failed to unmask PHI tokens:', err);
+            sendSseError(res, 500, `Failed to unmask PHI tokens: ${err.message}`);
+            return;
+        }
+
+        const unmaskedString = (unmaskRes && typeof unmaskRes === 'object' && unmaskRes.unmasked_transcript)
+            ? unmaskRes.unmasked_transcript
+            : String(unmaskRes || rawString);
+
+        // Parse the unmasked string into JSON
+        let soapNoteAndBillingResult;
+        try {
+            soapNoteAndBillingResult = JSON.parse(unmaskedString);
+        } catch (err) {
+            console.error('Failed to parse LLM response as JSON after unmasking:', err, { unmaskedString });
+            sendSseError(res, 500, `Failed to parse SOAP note response as JSON: ${err.message}`);
+            return;
+        }
+        const end_time = new Date().toISOString();
+        console.log("[soap and billing] time: ", (end_time - transcribe_end_time) / 1000, 's');
+        console.log('{/prompt-llm} Total time: ', (end_time - start_time) / 1000, 's');
+
+        response.status = 'soap note complete';
+        response.message = 'SOAP note and billing suggestion created successfully!';
+        res.write(`data: ${JSON.stringify({ ...response, data: soapNoteAndBillingResult })}\n\n`);
+        res.end();
+
+    } catch (error) {
+        console.error('Processing error:', error);
+        response.status = 'error';
+        response.message = `Processing failed: ${error.message}`;
+        res.write(`data: ${JSON.stringify(response)}\n\n`);
+        res.end();
+    }
 }

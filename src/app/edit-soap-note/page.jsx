@@ -8,6 +8,7 @@ import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPre
 import ExportDataAsFileMenu from "@/src/components/ExportDataAsFileMenu";
 import id from "zod/v4/locales/id.cjs";
 import Auth from "@/src/components/Auth.jsx";
+import CopyToClipboard from '@/src/components/CopyToClipboard.jsx';
 
 function EditSoapNoteInner() {
   const router = useRouter();
@@ -327,6 +328,9 @@ function EditSoapNoteInner() {
                 style={{ minHeight: "8rem" }}
                 placeholder="Subjective notes will appear here..."
               />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                <CopyToClipboard text={soapSubjective} label="Copy" placement="right" />
+              </div>
             </div>
             <div className="mb-6">
               <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
@@ -340,6 +344,9 @@ function EditSoapNoteInner() {
                 style={{ minHeight: "8rem" }}
                 placeholder="Objective notes will appear here..."
               />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                <CopyToClipboard text={soapObjective} label="Copy" placement="right" />
+              </div>
             </div>
             <div className="mb-6">
               <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
@@ -353,6 +360,9 @@ function EditSoapNoteInner() {
                 style={{ minHeight: "8rem" }}
                 placeholder="Assessment notes will appear here..."
               />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                <CopyToClipboard text={soapAssessment} label="Copy" placement="right" />
+              </div>
             </div>
             <div className="mb-6">
               <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
@@ -366,6 +376,9 @@ function EditSoapNoteInner() {
                 style={{ minHeight: "8rem" }}
                 placeholder="Plan notes will appear here..."
               />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                <CopyToClipboard text={soapPlan} label="Copy" placement="right" />
+              </div>
             </div>
             <div className="mb-6">
               <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
@@ -379,6 +392,9 @@ function EditSoapNoteInner() {
                 style={{ minHeight: "20rem" }}
                 placeholder="Billing suggestion will appear here..."
               />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                <CopyToClipboard text={billingSuggestion} label="Copy" placement="right" />
+              </div>
             </div>
             <div className="flex flex-col items-end">
               <button

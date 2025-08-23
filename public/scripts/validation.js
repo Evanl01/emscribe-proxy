@@ -36,9 +36,9 @@ export const validateAudioFile = (file) => {
     return { valid: false, error: 'No file provided' };
   }
 
-  const validTypes = ['audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg'];
+  const validTypes = ['audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg', 'video/webm', 'video/mp4', 'audio/mp4', 'audio/m4a', 'audio/x-m4a'];
   if (!validTypes.some(type => file.type.includes(type))) {
-    return { valid: false, error: 'File must be in a supported audio format (MP3, WAV, WebM, OGG)' };
+    return { valid: false, error: 'File must be in a supported audio format (MP3, WAV, WebM, OGG, MP4, M4A)' };
   }
 
   const maxSize = 30 * 1024 * 1024; // 30MB

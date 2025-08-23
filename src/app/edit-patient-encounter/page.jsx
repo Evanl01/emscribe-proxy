@@ -9,6 +9,7 @@ import { set } from "zod";
 import no from "zod/v4/locales/no.cjs";
 import ExportDataAsFileMenu from "@/src/components/ExportDataAsFileMenu.jsx";
 import Auth from "@/src/components/Auth.jsx";
+import CopyToClipboard from '@/src/components/CopyToClipboard.jsx';
 
 function EditPatientEncounterInner() {
   const router = useRouter();
@@ -481,14 +482,19 @@ function EditPatientEncounterInner() {
                 <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
                   Transcript
                 </label>
-                <textarea
-                  value={transcript}
-                  onChange={(e) => setTranscript(e.target.value)}
-                  disabled={isSaving}
-                  className="w-full h-100 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 bg-white resize-none"
-                  style={{ minHeight: "20rem" }}
-                  placeholder="Transcript will appear here..."
-                />
+                <div>
+                  <textarea
+                    value={transcript}
+                    onChange={(e) => setTranscript(e.target.value)}
+                    disabled={isSaving}
+                    className="w-full h-100 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 bg-white resize-none"
+                    style={{ minHeight: "20rem" }}
+                    placeholder="Transcript will appear here..."
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                    <CopyToClipboard text={transcript} label="Copy" placement="right" />
+                  </div>
+                </div>
               </div>
               <div className="flex flex-col items-end">
                 <div className="flex gap-4">
@@ -705,6 +711,9 @@ function EditPatientEncounterInner() {
                   style={{ minHeight: "8rem" }}
                   placeholder="Subjective notes..."
                 />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                  <CopyToClipboard text={soapSubjective} label="Copy" placement="right" />
+                </div>
               </div>
               <div className="mb-6">
                 <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
@@ -717,6 +726,9 @@ function EditPatientEncounterInner() {
                   style={{ minHeight: "8rem" }}
                   placeholder="Objective notes..."
                 />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                  <CopyToClipboard text={soapObjective} label="Copy" placement="right" />
+                </div>
               </div>
               <div className="mb-6">
                 <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
@@ -729,6 +741,9 @@ function EditPatientEncounterInner() {
                   style={{ minHeight: "8rem" }}
                   placeholder="Assessment notes..."
                 />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                  <CopyToClipboard text={soapAssessment} label="Copy" placement="right" />
+                </div>
               </div>
               <div className="mb-6">
                 <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
@@ -741,6 +756,9 @@ function EditPatientEncounterInner() {
                   style={{ minHeight: "8rem" }}
                   placeholder="Plan notes..."
                 />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                  <CopyToClipboard text={soapPlan} label="Copy" placement="right" />
+                </div>
               </div>
               <div className="mb-6">
                 <label className="block text-sm font-bold text-xl text-gray-700 mb-2">
@@ -753,6 +771,9 @@ function EditPatientEncounterInner() {
                   style={{ minHeight: "20rem" }}
                   placeholder="Billing suggestion..."
                 />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                  <CopyToClipboard text={billingSuggestion} label="Copy" placement="right" />
+                </div>
               </div>
               <div className="p-6 border-t border-gray-200">
                 <div className="flex flex-col items-end">
