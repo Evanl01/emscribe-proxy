@@ -1,6 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import React, { useState, useRef, useEffect } from "react";
+import useWakeLock from "@/src/hooks/useWakeLock";
 import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
@@ -19,6 +20,16 @@ let supabase = createClient(
 
 export default function NewPatientEncounter() {
   const router = useRouter();
+
+  // Wake lock hook - keep screen on during on-page recording
+  const {
+    isSupportedWakeLock,
+    isWakeLockActive,
+    isWakeLockPending,
+    wakeLockError,
+    acquireWakeLock,
+    releaseWakeLock,
+  } = useWakeLock();
 
   // State management
   const [activeSection, setActiveSection] = useState("upload");
@@ -1203,6 +1214,16 @@ export default function NewPatientEncounter() {
       mediaRecorder.start(1000); // Collect data every second
       setIsRecording(true);
 
+      // Try to acquire wake lock (best-effort). Do not block recording if it fails.
+      try {
+        if (typeof acquireWakeLock === "function") {
+          const ok = await acquireWakeLock();
+          console.log("Wake lock acquire result:", ok);
+        }
+      } catch (e) {
+        console.warn("Wake lock acquisition threw:", e);
+      }
+
       // Start duration counter - use functional update to avoid stale closure
       recordingIntervalRef.current = setInterval(() => {
         setRecordingDuration((prevDuration) => {
@@ -1233,6 +1254,13 @@ export default function NewPatientEncounter() {
         clearInterval(recordingIntervalRef.current);
         recordingIntervalRef.current = null;
       }
+    }
+
+    // Release wake lock when recording stops
+    try {
+      if (typeof releaseWakeLock === "function") releaseWakeLock();
+    } catch (e) {
+      console.warn("Error releasing wake lock on stop:", e);
     }
   };
 
@@ -1709,7 +1737,39 @@ export default function NewPatientEncounter() {
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Record Audio</h3>
                   <div className="text-center space-y-4">
-                    <div className="text-2xl">{isRecording ? "🔴" : "🎤"}</div>
+                    {/* <div className="text-2xl">{isRecording ? "🔴" : "🎤"}</div> */}
+                    <div className="flex items-center justify-center space-x-2">
+                      <div className="text-2xl">
+                        {isRecording ? "🔴" : "🎤"}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        {isRecording ? (
+                          <span className="inline-flex items-center gap-2">
+                            <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-800">
+                              Keep Awake
+                            </span>
+                            <span className="text-xs">
+                              {isSupportedWakeLock
+                                ? isWakeLockActive
+                                  ? "Active"
+                                  : isWakeLockPending
+                                  ? "Pending"
+                                  : "Inactive"
+                                : "Unsupported"}
+                              {process.env.NODE_ENV !== "production" && (
+                                <span className="sr-only">{` wk: ${
+                                  isWakeLockActive
+                                    ? "A"
+                                    : isWakeLockPending
+                                    ? "P"
+                                    : "N"
+                                }`}</span>
+                              )}
+                            </span>
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
 
                     {isRecording && (
                       <div className="text-lg font-mono">
