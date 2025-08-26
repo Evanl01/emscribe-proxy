@@ -62,7 +62,7 @@ export const handleSignOut = async ({ redirectTo } = {}) => {
   } catch (error) {
     // Network failure — still clear local state
     try { deleteJWT(); } catch (e) { /* ignore */ }
-    try { document.cookie = 'refresh_token=; Path=/; Max-Age=0; SameSite=Lax;'; } catch (e) {}
+    try { document.cookie = 'refresh_token=; Path=/; Max-Age=0; SameSite=Lax;'; } catch (e) { }
     if (redirectTo) {
       try { window.location.assign(redirectTo); } catch (e) { window.location.href = redirectTo; }
       return { success: false, error: error?.message || String(error) };
@@ -98,7 +98,7 @@ export const fetchWithRefresh = async (input, init = {}) => {
     const newToken = j?.accessToken || j?.token || null;
     if (!newToken) return resp;
     // update client-side jwt store
-    try { setJWT(newToken); } catch (e) {}
+    try { setJWT(newToken); } catch (e) { }
     // retry with new token
     resp = await makeRequest(newToken);
     return resp;
@@ -114,12 +114,12 @@ export const getAllTranscripts = async () => {
     const res = await fetch(`${API_BASE}/api/transcripts/batch`, {
       headers: { 'Authorization': `Bearer ${jwt}` }
     });
-    
+
     if (!res.ok) {
       console.error('Failed to fetch transcripts:', res.status, res.statusText);
       return {};
     }
-    
+
     return await res.json();
   } catch (error) {
     console.error('Error fetching transcripts:', error);
@@ -134,16 +134,32 @@ export const getAllSoapNotes = async () => {
     const res = await fetch(`${API_BASE}/api/soap-notes/batch`, {
       headers: { 'Authorization': `Bearer ${jwt}` }
     });
-    
+
     if (!res.ok) {
       console.error('Failed to fetch SOAP notes:', res.status, res.statusText);
       return {};
     }
-    
+
     return await res.json();
   } catch (error) {
     console.error('Error fetching SOAP notes:', error);
     return {};
+  }
+};
+
+export const checkRefreshCookie = async () => {
+  try {
+    const resp = await fetch("/api/auth/cookie-status", {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+    if (!resp.ok) return false;
+    const body = await resp.json();
+    return !!body?.cookiePresent;
+  } catch (e) {
+    console.warn("checkRefreshCookie failed:", e);
+    return false;
   }
 };
 
@@ -159,13 +175,13 @@ export const saveTranscript = async (transcriptObj) => {
   try {
     const res = await fetch(`${API_BASE}/api/transcripts`, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        'Authorization': `Bearer ${jwt}` 
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${jwt}`
       },
       body: JSON.stringify(transcriptObj)
     });
-    
+
     return await res.json();
   } catch (error) {
     console.error('Error saving transcript:', error);
@@ -179,13 +195,13 @@ export const saveSoapNote = async (soapNoteObj) => {
   try {
     const res = await fetch(`${API_BASE}/api/soap-notes`, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        'Authorization': `Bearer ${jwt}` 
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${jwt}`
       },
       body: JSON.stringify(soapNoteObj)
     });
-    
+
     return await res.json();
   } catch (error) {
     console.error('Error saving SOAP note:', error);
@@ -207,7 +223,7 @@ export const deleteTranscript = async (id) => {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${jwt}` }
     });
-    
+
     return await res.json();
   } catch (error) {
     console.error('Error deleting transcript:', error);
@@ -223,7 +239,7 @@ export const deleteSoapNote = async (id) => {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${jwt}` }
     });
-    
+
     return await res.json();
   } catch (error) {
     console.error('Error deleting SOAP note:', error);
@@ -241,13 +257,13 @@ export const deleteDotPhrase = async (id) => {
 export const searchTranscripts = async (query) => {
   const transcripts = await getAllTranscripts();
   const results = [];
-  
+
   for (const [id, transcript] of Object.entries(transcripts)) {
     if (transcript.text?.toLowerCase().includes(query.toLowerCase()) ||
-        transcript.chiefComplaint?.toLowerCase().includes(query.toLowerCase())) {
+      transcript.chiefComplaint?.toLowerCase().includes(query.toLowerCase())) {
       results.push(transcript);
     }
   }
-  
+
   return results.sort((a, b) => b.timestamp - a.timestamp);
 };

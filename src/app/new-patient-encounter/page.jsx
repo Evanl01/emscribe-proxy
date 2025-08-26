@@ -163,8 +163,9 @@ export default function NewPatientEncounter() {
   const runStartupChecks = async () => {
     try {
       const inc = await detectIncognitoMode();
-      const storage = await getStorageQuota();
-      const cookies = await testThirdPartyCookies();
+  const storage = await getStorageQuota();
+  // Check for server-visible refresh cookie (HttpOnly cookies not visible to JS)
+  const refreshCookieExists = await api.checkRefreshCookie();
 
       let lsOk = true;
       try {
@@ -182,17 +183,11 @@ export default function NewPatientEncounter() {
 
       try {
         jwt = api.getJWT();
-
-        // Check for refresh token cookie presence
-        const cookieString = document.cookie || "";
-        refreshTokenCookieAvailable =
-          cookieString.includes("refresh_token") ||
-          cookieString.includes("refresh-token") ||
-          cookieString.includes("sb-");
-
-        effectiveCookies = cookies && refreshTokenCookieAvailable;
+        refreshTokenCookieAvailable = !!refreshCookieExists;
+        // effectiveCookies represents whether cookies generally worked and the refresh cookie is present
+        effectiveCookies = refreshCookieExists;
       } catch (e) {
-        console.warn("JWT/cookie checks failed:", e);
+        console.warn("JWT/refreshCookie checks failed:", e);
         jwt = null;
         refreshTokenCookieAvailable = false;
         effectiveCookies = false;
@@ -903,12 +898,6 @@ export default function NewPatientEncounter() {
 
       // Attempt upload: try current client first, then refresh+retry once if necessary
       // Also compare with fresh client to detect stale state issues
-      console.log("[handleRecordingFileUpload] client comparison:", {
-        moduleClientId: supabase.supabaseKey?.substring(0, 10) + "...",
-        freshClientId: freshSupabase.supabaseKey?.substring(0, 10) + "...",
-        sameInstance: supabase === freshSupabase,
-      });
-
       const uploadResult = await uploadWithRetry(filePath, file);
 
       setIsSaving(false);
