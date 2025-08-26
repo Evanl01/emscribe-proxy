@@ -211,7 +211,7 @@ const Header = () => {
       setUserMenuOpen(false);
       setMenuOpen(false);
       // ask api helper to not perform its own redirect
-      await api.handleSignOut({ redirectTo: null });
+      await api.handleSignOut();
     } catch (e) {
       // ignore errors here; still redirect to login
       // console.warn('signOut error', e);

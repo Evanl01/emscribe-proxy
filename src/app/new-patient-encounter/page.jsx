@@ -1,5 +1,5 @@
 "use client";
-import { useRouter } from "next/navigation";
+import { redirect, useRouter } from "next/navigation";
 import React, { useState, useRef, useEffect } from "react";
 import useWakeLock from "@/src/hooks/useWakeLock";
 import * as api from "@/public/scripts/api.js";
@@ -143,6 +143,163 @@ export default function NewPatientEncounter() {
 
   // Error message for missing fields
   const [errorMessage, setErrorMessage] = useState("");
+
+  // Cache incognito/localStorage/cookie checks to run once on mount
+  const [incognitoStatus, setIncognitoStatus] = useState(null);
+  const [storageQuotaInfo, setStorageQuotaInfo] = useState(null);
+  const [cookiesWork, setCookiesWork] = useState(null);
+  const [localStorageAccessible, setLocalStorageAccessible] = useState(null);
+  // Cache Supabase auth/session info on mount to avoid "split-brain" later
+  const [
+    refreshTokenCookieAvailableOnMount,
+    setRefreshTokenCookieAvailableOnMount,
+  ] = useState(null);
+  const [jwtOnMount, setJwtOnMount] = useState(null);
+
+  // Run storage/cookie/incognito checks once when the page mounts so
+  // subsequent flows can use cached results (helps with incognito detection)
+  const isMountedRef = useRef(true);
+
+  const runStartupChecks = async () => {
+    try {
+      const inc = await detectIncognitoMode();
+      const storage = await getStorageQuota();
+      const cookies = await testThirdPartyCookies();
+
+      let lsOk = true;
+      try {
+        localStorage.setItem("emscribe_localstorage_test", "1");
+        localStorage.removeItem("emscribe_localstorage_test");
+        lsOk = true;
+      } catch (e) {
+        lsOk = false;
+      }
+
+      // JWT and refresh token checks for incognito detection
+      let jwt = null;
+      let refreshTokenCookieAvailable = false;
+      let effectiveCookies = false;
+
+      try {
+        jwt = api.getJWT();
+
+        // Check for refresh token cookie presence
+        const cookieString = document.cookie || "";
+        refreshTokenCookieAvailable =
+          cookieString.includes("refresh_token") ||
+          cookieString.includes("refresh-token") ||
+          cookieString.includes("sb-");
+
+        effectiveCookies = cookies && refreshTokenCookieAvailable;
+      } catch (e) {
+        console.warn("JWT/cookie checks failed:", e);
+        jwt = null;
+        refreshTokenCookieAvailable = false;
+        effectiveCookies = false;
+      }
+
+      const result = {
+        incognitoStatus: inc,
+        storageQuotaInfo: storage,
+        cookiesWork: effectiveCookies,
+        localStorageAccessible: lsOk,
+        refreshTokenCookieAvailable,
+        jwtPresent: !!jwt,
+      };
+
+      if (isMountedRef.current) {
+        setRefreshTokenCookieAvailableOnMount(refreshTokenCookieAvailable);
+        setJwtOnMount(jwt || null);
+        setCookiesWork(effectiveCookies);
+        setIncognitoStatus(inc);
+        setStorageQuotaInfo(storage);
+        setLocalStorageAccessible(lsOk);
+      }
+
+      console.log("Startup checks:", result);
+      return result;
+    } catch (e) {
+      const errorResult = {
+        incognitoStatus: null,
+        storageQuotaInfo: null,
+        cookiesWork: false,
+        localStorageAccessible: false,
+        refreshTokenCookieAvailable: false,
+        jwtPresent: false,
+      };
+
+      if (isMountedRef.current) {
+        setIncognitoStatus(null);
+        setStorageQuotaInfo(null);
+        setCookiesWork(false);
+        setLocalStorageAccessible(false);
+        setRefreshTokenCookieAvailableOnMount(false);
+        setJwtOnMount(null);
+      }
+
+      return errorResult;
+    }
+  };
+
+  const handleAuthError = (diagnosticData, router) => {
+    console.error(
+      "[handleAuthError] Authentication failed - diagnostic analysis:",
+      diagnosticData
+    );
+
+    let errorMessage = "You must be logged in to upload recordings.";
+
+    if (diagnosticData.isIncognito === "localhost-incognito") {
+      errorMessage =
+        "Your session has expired in incognito/private mode on localhost.\n\n" +
+        "Note: Localhost has relaxed incognito restrictions, but session tokens may still expire. " +
+        "Please log in again.";
+    } else if (
+      diagnosticData.isIncognito === true &&
+      diagnosticData.jwtPresent
+    ) {
+      errorMessage =
+        "Your session has expired in incognito/private mode.\n\n" +
+        "Incognito mode blocks refresh token cookies needed to maintain long sessions. " +
+        "Please log in again or use normal browsing mode for better session persistence.";
+    } else if (diagnosticData.isIncognito === true) {
+      errorMessage +=
+        "\n\nIncognito/Private mode detected. This may cause authentication issues due to restricted cookies and storage.";
+    } else if (diagnosticData.isIncognito === "localhost-normal") {
+      errorMessage +=
+        "\n\nRunning on localhost with relaxed incognito restrictions.";
+    } else if (diagnosticData.jwtPresent) {
+      errorMessage +=
+        "\n\nNote: Your login session appears to be active but browser storage is restricted, so your recording files cannot be uploaded. \nTry refreshing the page. If that doesn't work, try using normal (non-Incognito/Private) browsing mode.";
+    }
+
+    alert(errorMessage);
+    api.handleSignOut();
+    router.push("/login");
+    return;
+  };
+  useEffect(() => {
+    isMountedRef.current = true;
+    
+    runStartupChecks().then((diagnosticData) => {
+      // Only call handleAuthError if there's actually a problem
+      const hasProblem =
+        diagnosticData.isIncognito === true ||
+        diagnosticData.isIncognito === "localhost-incognito" ||
+        diagnosticData.cookiesWork === false ||
+        diagnosticData.localStorageAccessible === false ||
+        diagnosticData.jwtPresent === false;
+
+      if (hasProblem) {
+        handleAuthError(diagnosticData, router);
+        return;
+      }
+    });
+    
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Recording refs
   const mediaRecorderRef = useRef(null);
@@ -566,130 +723,77 @@ export default function NewPatientEncounter() {
   };
 
   // Helper: attempt upload with the current client first; on failure, refresh and retry once using a temporary client
-  const uploadWithTempClient = async (filePath, file) => {
-    // small helper to detect auth-like errors from Supabase client result.error
-    console.log(
-      "[uploadWithTempClient]: Before calling supabase.storage.upload. JWT:",
-      api.getJWT()
-    );
-    const isAuthErrorFromSupabase = (err) => {
-      if (!err) return false;
-      // Supabase error objects can use different field names for HTTP status
-      const statusRaw =
-        err.statusCode ?? err.status ?? err.status_code ?? err?.status;
-      const status = statusRaw ? Number(statusRaw) : null;
-      const message = (err?.message || err?.error || err?.msg || "")
-        .toString()
-        .toLowerCase();
-      console.log("Supabase error details:", { status, message, raw: err });
-
-      // Common auth-related HTTP statuses
-      if (status === 403) return true;
-
-      // Match common auth-related keywords in the message
-      if (
-        /unauthoriz|authoriz|jwt|jws|token|session|access token/i.test(message)
-      )
-        return true;
-
-      return false;
-    };
-
-    // 1) Try with currently-initialized client (may be using anon key or already-authenticated client)
-    try {
-      console.log("Attempting upload with current Supabase client:", supabase);
-      const firstAttempt = await supabase.storage
-        .from("audio-files")
-        .upload(filePath, file, { upsert: false });
-
-      console.log("First attempt:", firstAttempt, "\nData:", firstAttempt.data);
-      // success
-      if (!firstAttempt.error && firstAttempt.data && firstAttempt.data.path) {
-        return { data: firstAttempt.data, error: null };
-      }
-
-      // If there's an error and it's NOT an auth error, throw it so caller handles it
-      if (firstAttempt.error && !isAuthErrorFromSupabase(firstAttempt.error)) {
-        // Throw the Supabase error object for caller
-        throw firstAttempt.error;
-      }
-
-      // Otherwise it's an auth-like error; fallthrough to refresh + retry
-      console.warn(
-        "Initial upload attempt failed and appears auth-related:",
-        firstAttempt.error
-      );
-    } catch (e) {
-      // If the thrown/caught exception is not an auth-like Supabase error, rethrow it
-      // (e may be a thrown Supabase error object or a thrown JS exception)
-      const maybeErrObj = e || {};
-      // If it's clearly an auth error, continue to refresh path; otherwise rethrow
-      if (!isAuthErrorFromSupabase(maybeErrObj)) {
-        console.warn("Initial upload threw non-auth error, rethrowing:", e);
-        throw e;
-      }
-      console.warn(
-        "Initial upload threw auth-like error, will attempt refresh and retry:",
-        e
-      );
-    }
-
-    // 2) Only for auth-like errors: Try refreshing access token and retry once with a temporary client
-    console.log("Attempting to refresh access token...");
-    const accessToken = await refreshAndGetAccessToken();
-    console.log("Access token after refresh:", accessToken);
-    if (!accessToken) {
-      // Caller should handle redirect to login
+  const uploadWithRetry = async (filePath, file) => {
+    const jwt = api.getJWT();
+    if (!jwt) {
       return {
         data: null,
-        error: new Error("Session expired or refresh failed"),
+        error: new Error("No JWT available"),
         requiresLogin: true,
       };
     }
 
-    try {
-      // Create a temporary supabase client for this upload only (do not mutate module-level client)
-      const tempSupabase = createClient(
+    // Helper to create authenticated client
+    const createAuthClient = (token) =>
+      createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL,
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
         {
-          global: { headers: { Authorization: `Bearer ${accessToken}` } },
+          global: { headers: { Authorization: `Bearer ${token}` } },
         }
       );
 
-      const secondAttempt = await tempSupabase.storage
+    // Helper to check if error is auth-related
+    const isAuthError = (err) => {
+      if (!err) return false;
+      const status = err.statusCode ?? err.status ?? err.status_code;
+      return (
+        status === 401 ||
+        status === 403 ||
+        /unauthorized|jwt|token|session/i.test(err.message || "")
+      );
+    };
+
+    try {
+      // First attempt with current JWT
+      const client = createAuthClient(jwt);
+      const result = await client.storage
         .from("audio-files")
         .upload(filePath, file, { upsert: false });
-      console.log(
-        "Second attempt:",
-        secondAttempt,
-        "\nData:",
-        secondAttempt.data
-      );
-      if (secondAttempt.error) {
-        throw secondAttempt.error;
-      }
-      if (
-        !secondAttempt.error &&
-        secondAttempt.data &&
-        secondAttempt.data.path
-      ) {
-        return { data: secondAttempt.data, error: null };
+
+      if (!result.error) {
+        return { data: result.data, error: null };
       }
 
-      // If retry failed, throw the error so caller can handle it
+      // If not an auth error, fail immediately
+      if (!isAuthError(result.error)) {
+        throw result.error;
+      }
 
-      // Unexpected fallback
-      throw new Error(
-        "Upload failed on retry (unhandled error): " +
-          JSON.stringify(secondAttempt)
-      );
-    } catch (e) {
-      console.error("Retry upload threw or failed:", e);
-      throw e;
+      // Try refreshing token and retry once
+      const newToken = await refreshAndGetAccessToken();
+      if (!newToken) {
+        return {
+          data: null,
+          error: new Error("Session expired"),
+          requiresLogin: true,
+        };
+      }
+
+      const retryClient = createAuthClient(newToken);
+      const retryResult = await retryClient.storage
+        .from("audio-files")
+        .upload(filePath, file, { upsert: false });
+
+      if (retryResult.error) {
+        throw retryResult.error;
+      }
+
+      return { data: retryResult.data, error: null };
+    } catch (error) {
+      throw error;
     }
   };
-
   // Handle file upload
   const handleRecordingFileUpload = async (file) => {
     if (!file) return;
@@ -720,328 +824,92 @@ export default function NewPatientEncounter() {
       });
       setIsSaving(true);
 
-      // Check current auth state with Supabase and log masked info for debugging
-      // Create a fresh client instance to avoid stale module-level state
-      const freshSupabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-      );
+      const jwt = api.getJWT();
+      if (!jwt) {
+        setIsSaving(false);
+        setCurrentStatus({ status: "error", message: "Not logged in" });
 
-      const userResp = await freshSupabase.auth.getUser();
-      const sessionResp = await freshSupabase.auth.getSession();
-      let user = userResp?.data?.user || null;
-
-      const maskEmailForLog = (email) => {
-        try {
-          if (!email || typeof email !== "string") return null;
-          const parts = email.split("@");
-          if (parts.length !== 2) return "***";
-          const local = parts[0];
-          const domain = parts[1];
-          const maskedLocal =
-            local.length <= 2
-              ? local.replace(/./g, "*")
-              : local[0] +
-                local.slice(1, 2).replace(/./g, "*") +
-                local.slice(-1);
-          return `${maskedLocal}@${domain}`;
-        } catch (e) {
-          return "***";
-        }
-      };
-
-      // Log summary (avoid printing full tokens/emails) to help debug multi-tab/session issues
-      try {
-        const jwt = api.getJWT();
-        const localStorageData = {
-          hasRecordingMetadata: !!localStorage.getItem(
-            LS_KEYS.recordingFileMetadata
-          ),
-          authKeys: Object.keys(localStorage).filter(
-            (key) => key.includes("auth") || key.includes("supabase")
-          ),
+        // Get cached diagnostic data or re-run checks if needed
+        let diagnosticData = {
+          isIncognito: incognitoStatus,
+          storageQuota: storageQuotaInfo,
+          cookiesWork: cookiesWork,
+          jwtPresent: !!jwtOnMount,
+          refreshTokenCookieAvailable: refreshTokenCookieAvailableOnMount,
+          localStorageAccessible: localStorageAccessible,
         };
 
-        console.log("[handleRecordingFileUpload] comprehensive auth state:", {
-          timestamp: new Date().toISOString(),
-          userAgent: navigator.userAgent.substring(0, 50) + "...",
-          origin: window.location.origin,
-          hasUser: !!user,
-          userId: user?.id || null,
-          maskedEmail: user ? maskEmailForLog(user.email) : null,
-          userResponseError: userResp?.error?.message || null,
-          sessionExists: !!sessionResp?.data?.session,
-          sessionError: sessionResp?.error?.message || null,
-          jwtPresent: !!jwt,
-          jwtLength: jwt ? jwt.length : 0,
-          localStorageState: localStorageData,
-          cookieCount: document.cookie.split(";").length,
-          tabId: Math.random().toString(36).substring(7), // Random tab identifier
-          // Add storage inspection to debug stale sessions
-          supabaseStorageKeys: Object.keys(localStorage).filter(
-            (key) => key.includes("supabase") || key.includes("sb-")
-          ),
-          sessionStorageKeys: Object.keys(sessionStorage).filter(
-            (key) => key.includes("supabase") || key.includes("sb-")
-          ),
-          // Add incognito/privacy mode detection
-          isIncognito: await detectIncognitoMode(),
-          cookieEnabled: navigator.cookieEnabled,
-          storageQuota: await getStorageQuota(),
-          thirdPartyCookies: await testThirdPartyCookies(),
-        });
-      } catch (e) {
-        console.log("[handleRecordingFileUpload] enhanced logging failed:", e);
-      }
-      // If no user is available in the client, stop and prompt for login
-      if (!user) {
-        setIsSaving(false);
-
-        // INCOGNITO FIX: Check if we have JWT but no Supabase session (split-brain auth)
-        const jwt = api.getJWT();
-        if (jwt && userResp?.error?.message?.includes("Auth session missing")) {
-          console.log(
-            "[handleRecordingFileUpload] INCOGNITO FIX: JWT exists but Supabase session missing - attempting to restore session..."
-          );
-
-          try {
-            // Try to restore Supabase session from JWT
-            await freshSupabase.auth.setSession({
-              access_token: jwt,
-              refresh_token: "", // We don't have refresh token in incognito, but access token might work
-            });
-
-            // Re-check user after restoring session
-            const restoredUserResp = await freshSupabase.auth.getUser();
-            const restoredUser = restoredUserResp?.data?.user;
-
-            console.log("[handleRecordingFileUpload] Session restore result:", {
-              success: !!restoredUser,
-              userId: restoredUser?.id,
-              email: maskEmailForLog(restoredUser?.email),
-              error: restoredUserResp?.error?.message,
-            });
-
-            // If restore worked, continue with the restored user
-            if (restoredUser) {
-              console.log(
-                "[handleRecordingFileUpload] Successfully restored Supabase session from JWT in incognito mode"
-              );
-              // Update variables and continue processing
-              user = restoredUser;
-              // Re-run the upload logic with restored user
-              return handleRecordingFileUpload(file);
-            }
-          } catch (restoreError) {
-            console.error(
-              "[handleRecordingFileUpload] Failed to restore session from JWT:",
-              restoreError
-            );
-
-            // If session restore fails, it might be because the access token expired
-            // and we can't refresh it due to missing refresh token cookie in incognito
-            console.warn(
-              "[handleRecordingFileUpload] Likely cause: Access token expired and refresh token cookie unavailable in incognito mode"
-            );
-          }
+        if (
+          incognitoStatus === null ||
+          storageQuotaInfo === null ||
+          cookiesWork === null
+        ) {
+          diagnosticData = await runStartupChecks();
+          return; // runStartupChecks will handle the error flow
         }
 
-        // Check if this is an incognito-specific issue
-        const isIncognito = await detectIncognitoMode();
-        const storageQuota = await getStorageQuota();
-        const cookiesWork = await testThirdPartyCookies();
-
-        console.error(
-          "[handleRecordingFileUpload] No user found - incognito analysis:",
-          {
-            isIncognito,
-            storageQuota,
-            cookiesWork,
-            cookieCount: document.cookie.split(";").length,
-            jwtPresent: !!jwt,
-            jwtLength: jwt?.length || 0,
-            refreshTokenCookieAvailable:
-              cookiesWork && document.cookie.includes("sb-"),
-            localStorageAccessible: (() => {
-              try {
-                localStorage.setItem("test", "test");
-                localStorage.removeItem("test");
-                return true;
-              } catch (e) {
-                return false;
-              }
-            })(),
-          }
-        );
-
-        let errorMessage = "You must be logged in to upload recordings.";
-        if (isIncognito === "localhost-incognito") {
-          errorMessage =
-            "Your session has expired in incognito/private mode on localhost.\n\n" +
-            "Note: Localhost has relaxed incognito restrictions, but session tokens may still expire. " +
-            "Please log in again.";
-        } else if (isIncognito === true && jwt) {
-          errorMessage =
-            "Your session has expired in incognito/private mode.\n\n" +
-            "Incognito mode blocks refresh token cookies needed to maintain long sessions. " +
-            "Please log in again or use normal browsing mode for better session persistence.";
-        } else if (isIncognito === true) {
-          errorMessage +=
-            "\n\nIncognito/Private mode detected. This may cause authentication issues due to restricted cookies and storage.";
-        } else if (isIncognito === "localhost-normal") {
-          errorMessage +=
-            "\n\nRunning on localhost with relaxed incognito restrictions.";
-        } else if (jwt && !user) {
-          errorMessage +=
-            "\n\nNote: Your login session appears to be active but browser storage is restricted, so your recording files cannot be uploaded. \nTry refreshing the page. If that doesn't work, try using normal (non-Incognito/Private) browsing mode.";
-        }
-
-        setCurrentStatus({ status: "error", message: "Not logged in" });
-        alert(errorMessage);
-        api.deleteJWT();
-        router.push("/login");
+        handleAuthError(diagnosticData, router);
         return;
       }
-
-      console.log("Current user:", {
-        id: user.id,
-        maskedEmail: maskEmailForLog(user.email),
-      });
 
       // CRITICAL FIX: Get user info from JWT instead of frontend client to avoid auth mismatch
-      let actualUser = user;
-      let actualEmail = user.email;
-
+      let user, email;
       try {
-        const jwt = api.getJWT();
-        if (jwt) {
-          // Decode JWT to get the actual authenticated user
-          const base64Url = jwt.split(".")[1];
-          const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-          const jsonPayload = decodeURIComponent(
-            atob(base64)
-              .split("")
-              .map(function (c) {
-                return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
-              })
-              .join("")
+        const base64Url = jwt.split(".")[1];
+        const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+        const jsonPayload = decodeURIComponent(
+          atob(base64)
+            .split("")
+            .map(function (c) {
+              return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
+            })
+            .join("")
+        );
+        const jwtPayload = JSON.parse(jsonPayload);
+
+        if (!jwtPayload.sub || !jwtPayload.email) {
+          throw new Error("Invalid JWT payload");
+        }
+
+        user = { id: jwtPayload.sub, email: jwtPayload.email };
+        email = jwtPayload.email;
+        if (!user || !user.id || !email) {
+          throw new Error(
+            "Invalid user information: " + JSON.stringify({ user, email })
           );
-          const jwtPayload = JSON.parse(jsonPayload);
-
-          console.log(
-            "[handleRecordingFileUpload] JWT user vs Frontend user:",
-            {
-              frontendUserId: user.id,
-              frontendEmail: maskEmailForLog(user.email),
-              jwtUserId: jwtPayload.sub,
-              jwtEmail: maskEmailForLog(jwtPayload.email),
-              mismatch:
-                user.id !== jwtPayload.sub || user.email !== jwtPayload.email,
-            }
-          );
-
-          // If there's a mismatch, try to refresh the Supabase client session
-          if (user.id !== jwtPayload.sub || user.email !== jwtPayload.email) {
-            console.warn(
-              "[handleRecordingFileUpload] CRITICAL: Auth state mismatch detected! Attempting to refresh Supabase session..."
-            );
-
-            try {
-              // Force session refresh by setting the session from JWT
-              await freshSupabase.auth.setSession({
-                access_token: jwt,
-                refresh_token: sessionResp?.data?.session?.refresh_token || "",
-              });
-
-              // Re-check user after setting session
-              const refreshedUserResp = await freshSupabase.auth.getUser();
-              const refreshedUser = refreshedUserResp?.data?.user;
-
-              console.log(
-                "[handleRecordingFileUpload] Session refresh result:",
-                {
-                  success: !!refreshedUser,
-                  newUserId: refreshedUser?.id,
-                  newEmail: maskEmailForLog(refreshedUser?.email),
-                  matchesJWT: refreshedUser?.id === jwtPayload.sub,
-                }
-              );
-
-              // If refresh worked, update our user reference
-              if (refreshedUser && refreshedUser.id === jwtPayload.sub) {
-                console.log(
-                  "[handleRecordingFileUpload] Successfully synchronized Supabase session with JWT"
-                );
-                // Update the module-level client too
-                await supabase.auth.setSession({
-                  access_token: jwt,
-                  refresh_token:
-                    sessionResp?.data?.session?.refresh_token || "",
-                });
-              }
-            } catch (refreshError) {
-              console.error(
-                "[handleRecordingFileUpload] Failed to refresh Supabase session:",
-                refreshError
-              );
-            }
-          }
-
-          // Use JWT user data for file operations to match server expectations
-          if (jwtPayload.sub && jwtPayload.email) {
-            actualUser = { id: jwtPayload.sub, email: jwtPayload.email };
-            actualEmail = jwtPayload.email;
-            console.log(
-              "[handleRecordingFileUpload] Using JWT user for consistency"
-            );
-          }
         }
       } catch (e) {
-        console.warn(
-          "[handleRecordingFileUpload] Failed to decode JWT, using frontend user:",
-          e
-        );
-      }
-
-      // Double-check that we have valid user data before proceeding
-      if (!actualUser?.id || !actualEmail) {
         setIsSaving(false);
-        setCurrentStatus({ status: "error", message: "Invalid user session" });
-        alert("Invalid user session. Please log in again.");
-        api.deleteJWT();
+        console.error("Error decoding JWT or extracting user info:", e);
+        setCurrentStatus({ status: "error", message: "Invalid session" });
+        alert("Invalid session. Please log in again.");
+        api.handleSignOut();
         router.push("/login");
         return;
       }
-
-      const userEmail = actualEmail;
-
       // Get extension from uploaded file name
       const originalName = file.name || "audio";
       const lastDot = originalName.lastIndexOf(".");
       const extension =
         lastDot !== -1 ? originalName.substring(lastDot + 1).toLowerCase() : "";
-      const fileName = `${userEmail}-${Date.now()}-${Math.floor(
-        Math.random() * 100
-      )
+      const fileName = `${email}-${Date.now()}-${Math.floor(Math.random() * 100)
         .toString()
         .padStart(2, "0")}${extension ? `.${extension}` : ""}`;
       console.log("[handleRecordingFileUpload] constructed filename/path:", {
         fileName,
-        filePath: `${actualUser?.id || "anonymous"}/${fileName}`,
-        usingJwtUser: actualUser !== user,
+        filePath: `${user?.id}/${fileName}`,
       });
-      const filePath = `${actualUser?.id || "anonymous"}/${fileName}`;
+      const filePath = `${user?.id || "anonymous"}/${fileName}`;
 
       // Attempt upload: try current client first, then refresh+retry once if necessary
       // Also compare with fresh client to detect stale state issues
-      const freshClientUpload = freshSupabase.storage.from("audio-files");
       console.log("[handleRecordingFileUpload] client comparison:", {
         moduleClientId: supabase.supabaseKey?.substring(0, 10) + "...",
         freshClientId: freshSupabase.supabaseKey?.substring(0, 10) + "...",
         sameInstance: supabase === freshSupabase,
       });
 
-      const uploadResult = await uploadWithTempClient(filePath, file);
+      const uploadResult = await uploadWithRetry(filePath, file);
 
       setIsSaving(false);
 
@@ -1510,6 +1378,7 @@ export default function NewPatientEncounter() {
           typeof error === "string" ? error : error?.message || "";
 
         if (errorMsg.includes("expired token") || errorMsg.includes("401")) {
+          api.handleSignOut();
           router.push("/login");
           return;
         }

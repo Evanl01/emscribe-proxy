@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@aws-sdk/client-comprehendmedical": "^3.864.0",
+    "@aws-sdk/client-comprehendmedical": "^3.876.0",
     "@supabase/supabase-js": "^2.52.0",
     "busboy": "^1.6.0",
     "cookie": "^1.0.2",

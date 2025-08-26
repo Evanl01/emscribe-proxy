@@ -19,8 +19,10 @@ export const deleteJWT = () => {
 
 // Sign-out helper: calls server to revoke session + clear httpOnly cookie (server-side),
 // then clears local client token and tries to clear any non-httpOnly cookie named "refresh_token".
+// By default this helper will NOT perform a redirect; pass { redirectTo: '/login' }
+// or another URL if you want the function to navigate after sign-out.
 // Name chosen as `handleSignOut` to match React event-handler naming conventions.
-export const handleSignOut = async ({ redirectTo = '/login' } = {}) => {
+export const handleSignOut = async ({ redirectTo } = {}) => {
   if (typeof window === 'undefined') throw new Error('handleSignOut must be called in the browser');
   const jwt = getJWT();
   const headers = { 'Content-Type': 'application/json' };
