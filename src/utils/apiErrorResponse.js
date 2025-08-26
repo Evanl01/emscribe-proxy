@@ -30,6 +30,9 @@ export function sendRouteError(status = 400, error = 'error', message = '') {
  */
 export function sendSseError(res, statusCode = 400, message = '') {
   const payload = apiErrorResponse(statusCode, 'error', message);
+  // Include a top-level status field that the client stream parser expects
+  // (e.g. { status: 'error', statusCode, error, message })
+  payload.status = 'error';
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
   res.end();
 }
