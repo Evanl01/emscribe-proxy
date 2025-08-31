@@ -217,8 +217,8 @@ export default async function handler(req, res) {
         res.write(`data: ${JSON.stringify(response)}\n\n`);
         // Transcribe audio using cloud GCP and mask with AWS Comprehend medical
         let transcriptResult;
-        const start_time = new Date().toISOString();
-        console.log("[transcribe_and_mask] Start time: ", start_time);
+        const start_time = Date.now(); // Use numeric timestamp instead of ISO string
+        console.log("[transcribe_and_mask] Start time: ", new Date(start_time).toISOString());
         try {
             transcriptResult = await transcribe_and_mask({ recording_file_signed_url, req, user });
         }
@@ -245,10 +245,10 @@ export default async function handler(req, res) {
         const transcript = transcriptResult.cloudRunData.transcript;
         const maskedTranscript = transcriptResult.maskResult.masked_transcript;
         const phiEntities = transcriptResult.maskResult.phi_entities;
-        const transcribe_end_time = new Date().toISOString();
-        console.log('[transcribe_and_mask] Total time: ', (transcribe_end_time - start_time)/1000, 's');
+        const transcribe_end_time = Date.now(); // Use numeric timestamp
+        
         console.log('Transcription Result:', transcriptResult);
-
+        console.log('[transcribe_and_mask] Total time: ', (transcribe_end_time - start_time) / 1000, 's');
         response.status = 'transcription complete';
         response.message = 'Transcription complete!';
         // Send message, with additional 'data' field for transcript
@@ -337,9 +337,9 @@ export default async function handler(req, res) {
             sendSseError(res, 500, `Failed to parse SOAP note response as JSON: ${err.message}`);
             return;
         }
-        const end_time = new Date().toISOString();
+        const end_time = Date.now(); // Use numeric timestamp
         console.log("[soap and billing] time: ", (end_time - transcribe_end_time) / 1000, 's');
-        console.log('{/prompt-llm} Total time: ', (end_time - start_time) / 1000, 's');
+        console.log('[/prompt-llm] Total time: ', (end_time - start_time) / 1000, 's');
 
         response.status = 'soap note complete';
         response.message = 'SOAP note and billing suggestion created successfully!';

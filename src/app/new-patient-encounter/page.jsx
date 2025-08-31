@@ -719,6 +719,13 @@ export default function NewPatientEncounter() {
 
   // Helper: attempt upload with the current client first; on failure, refresh and retry once using a temporary client
   const uploadWithRetry = async (filePath, file) => {
+    console.log("[uploadWithRetry] attempting upload:", {
+      fileName: filePath.split('/').pop(),
+      filePath: filePath,
+      fileSize: file.size,
+      fileType: file.type
+    });
+    
     const jwt = api.getJWT();
     if (!jwt) {
       return {
@@ -757,6 +764,12 @@ export default function NewPatientEncounter() {
         .upload(filePath, file, { upsert: false });
 
       if (!result.error) {
+        console.log("[uploadWithRetry] upload successful:", {
+          fileName: filePath.split('/').pop(),
+          filePath: filePath,
+          resultPath: result.data?.path,
+          resultId: result.data?.id
+        });
         return { data: result.data, error: null };
       }
 
@@ -766,6 +779,7 @@ export default function NewPatientEncounter() {
       }
 
       // Try refreshing token and retry once
+      console.log("[uploadWithRetry] first attempt failed with auth error, retrying with refreshed token");
       const newToken = await refreshAndGetAccessToken();
       if (!newToken) {
         return {
@@ -784,6 +798,12 @@ export default function NewPatientEncounter() {
         throw retryResult.error;
       }
 
+      console.log("[uploadWithRetry] retry upload successful:", {
+        fileName: filePath.split('/').pop(),
+        filePath: filePath,
+        resultPath: retryResult.data?.path,
+        resultId: retryResult.data?.id
+      });
       return { data: retryResult.data, error: null };
     } catch (error) {
       throw error;

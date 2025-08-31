@@ -4,6 +4,7 @@ import {
   DetectPHICommand,
 } from "@aws-sdk/client-comprehendmedical";
 import { authenticateRequest } from "@/src/utils/authenticateRequest";
+
 /**
  * Reusable mask_phi helper for server-side usage.
  * Returns { masked_transcript, phi_entities }
@@ -13,6 +14,82 @@ export async function mask_phi(transcript, mask_threshold = 0.15) {
     throw new Error("Transcript is required and must be a string");
   }
 
+  // AWS Comprehend Medical has a 20,000 character limit
+  const MAX_CHARS = 19000; // Leave some buffer for safety
+  
+  // If transcript is within limit, process normally
+  if (transcript.length <= MAX_CHARS) {
+    return await processSingleChunk(transcript, mask_threshold);
+  }
+
+  // For longer transcripts, split into chunks and process each
+  console.log(`Transcript length (${transcript.length}) exceeds AWS limit. Splitting into chunks.`);
+  
+  const chunks = splitIntoChunks(transcript, MAX_CHARS);
+  let allEntities = [];
+  let currentOffset = 0;
+  let maskedTranscript = "";
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    console.log(`Processing chunk ${i + 1}/${chunks.length}, length: ${chunk.length}`);
+    
+    const chunkResult = await processSingleChunk(chunk, mask_threshold);
+    
+    // Adjust entity offsets to account for previous chunks
+    const adjustedEntities = chunkResult.phi_entities.map(entity => ({
+      ...entity,
+      BeginOffset: entity.BeginOffset + currentOffset,
+      EndOffset: entity.EndOffset + currentOffset,
+      Id: entity.Id + (i * 1000) // Offset IDs to avoid conflicts between chunks
+    }));
+    
+    allEntities = allEntities.concat(adjustedEntities);
+    maskedTranscript += chunkResult.masked_transcript;
+    currentOffset += chunk.length;
+  }
+
+  return {
+    masked_transcript: maskedTranscript,
+    phi_entities: allEntities,
+    skipped_entities: [], // Could aggregate if needed
+    mask_threshold: mask_threshold !== undefined ? Number(mask_threshold) : Number(process.env.MASK_THRESHOLD ?? 0.5),
+    chunks_processed: chunks.length
+  };
+}
+
+/**
+ * Split text into chunks that respect word boundaries when possible
+ */
+function splitIntoChunks(text, maxChars) {
+  const chunks = [];
+  let start = 0;
+  
+  while (start < text.length) {
+    let end = Math.min(start + maxChars, text.length);
+    
+    // If not at the end of the text, try to break at a word boundary
+    if (end < text.length) {
+      // Look backwards for a space, period, or newline within the last 500 chars
+      const searchStart = Math.max(start, end - 500);
+      const breakPoint = text.lastIndexOf(' ', end);
+      
+      if (breakPoint > searchStart) {
+        end = breakPoint + 1; // Include the space
+      }
+    }
+    
+    chunks.push(text.slice(start, end));
+    start = end;
+  }
+  
+  return chunks;
+}
+
+/**
+ * Process a single chunk of text (original logic)
+ */
+async function processSingleChunk(transcript, mask_threshold = 0.15) {
   // AWS Comprehend Medical client
   const client = new ComprehendMedicalClient({
     region: process.env.AWS_REGION || "us-east-1",
@@ -21,7 +98,7 @@ export async function mask_phi(transcript, mask_threshold = 0.15) {
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
     },
   });
-  // console.log("ComprehendMedical client initialized", client);
+
   // Call detect PHI
   const command = new DetectPHICommand({ Text: transcript });
   const response = await client.send(command);
@@ -29,7 +106,6 @@ export async function mask_phi(transcript, mask_threshold = 0.15) {
 
   // Sort entities (descending) so replacements don't shift indexes
   const sortedEntities = [...entities].sort((a, b) => b.BeginOffset - a.BeginOffset);
-  // console.log("Detected PHI entities:", sortedEntities);
 
   // Determine threshold: param -> env -> default
   const threshold =
@@ -63,7 +139,6 @@ export async function mask_phi(transcript, mask_threshold = 0.15) {
       maskedTranscript.slice(entity.EndOffset);
   }
 
-  
   console.log("Masked transcript:", maskedTranscript, "PHI entities:", phi_entities);
 
   return { masked_transcript: maskedTranscript, phi_entities, skipped_entities, mask_threshold: threshold };

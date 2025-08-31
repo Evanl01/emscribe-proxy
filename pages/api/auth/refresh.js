@@ -39,6 +39,8 @@ export default async function handler(req, res) {
 
   dbg('handler invoked', { method: req.method, url: req.url });
 
+  const sb = supabaseAdmin();
+
   // parse cookie
   const cookieHeader = req.headers.cookie || '';
   dbg('raw cookie header', cookieHeader ? cookieHeader.slice(0, 200) : '<empty>');
@@ -50,12 +52,110 @@ export default async function handler(req, res) {
 
   dbg('parsed cookies keys', Object.keys(cookies));
 
-  const wrapper = cookies.refresh_token;
+  // Support multiple client types:
+  // - web: httpOnly cookie named `refresh_token`
+  // - mobile/native: send the same signed wrapper in the JSON body as `refresh_token`, `refreshToken`, or `token`
+  // - mobile/native (alternate): send the same signed wrapper in a header `x-refresh-token` or `refresh-token`
+  const wrapperFromBody = req.body && (req.body.refresh_token || req.body.refreshToken || req.body.token);
+  const wrapperFromHeader = req.headers['x-refresh-token'] || req.headers['refresh-token'];
+  const wrapper = wrapperFromBody || wrapperFromHeader || cookies.refresh_token;
   if (!wrapper) {
-    dbg('no refresh_token cookie found');
+    dbg('no refresh_token provided in cookie, body, or headers');
     return res.status(401).json({ error: 'no_refresh_token' });
   }
+  dbg('received refresh wrapper source', {
+    fromBody: wrapperFromBody,
+    fromHeader: wrapperFromHeader,
+    fromCookie: cookies.refresh_token
+  });
   dbg('received refresh wrapper (trimmed)', String(wrapper).slice(0, 80));
+
+  // If the client passed a refresh token in the request body, treat it as a raw
+  // Supabase refresh token from a mobile app. If it came from cookie/header,
+  // treat it as a signed wrapper from web client.
+  if (wrapperFromBody) {
+    dbg('token came from request body, treating as raw refresh token from mobile app');
+    try {
+      const baseUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL.replace(/\/$/, '')}/auth/v1/token`;
+      const url = `${baseUrl}?grant_type=refresh_token`;
+      const jsonBody = JSON.stringify({ refresh_token: wrapper });
+      dbg('attempting supabase exchange for raw refresh token', { url });
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+          apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+        },
+        body: jsonBody,
+      });
+
+      if (!resp.ok) {
+        let text;
+        try { text = await resp.text(); } catch (e) { text = '<could not read body>'; }
+        console.error('supabase token exchange failed for raw token', text);
+        dbg('supabase exchange failed for raw token', { status: resp.status, bodyPreview: String(text).slice(0,200) });
+        return res.status(401).json({ error: 'invalid_refresh_exchange' });
+      }
+
+      const session = await resp.json();
+      const returnedRefresh = session.refresh_token;
+      const accessToken = session.access_token;
+      dbg('supabase session exchange result for raw token', { hasAccessToken: !!accessToken, hasRefreshToken: !!returnedRefresh });
+
+      if (!accessToken) {
+        dbg('no access token returned from supabase for raw token');
+        return res.status(500).json({ error: 'no_access_token_from_supabase' });
+      }
+
+      // Persist returned refresh token as a new server-side row
+      try {
+        const newTid = crypto.randomUUID();
+        const hashed = encryptionUtils.hashToken(returnedRefresh);
+        const enc = encryptionUtils.encryptRefreshToken(returnedRefresh);
+        // Determine userId from returned access token if possible
+        let userIdFromAccess = null;
+        try {
+          const parts = accessToken.split('.');
+          if (parts.length === 3) {
+            const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+            userIdFromAccess = payload.sub || null;
+          }
+        } catch (e) {
+          dbg('failed to decode access token to extract user id', e && e.message);
+        }
+
+        const insertObj = { id: newTid, user_id: userIdFromAccess, token_hash: hashed, token_enc: enc, issued_at: new Date(), last_activity_at: new Date(), expires_at: new Date(Date.now() + REFRESH_MAX_AGE_SECONDS * 1000), revoked: false };
+        const { error: insertErr } = await sb.from(refreshTokensTable).insert([insertObj]);
+        if (insertErr) {
+          console.error('insert refresh token error (raw token flow)', insertErr);
+          dbg('insertErr (raw token flow)', insertErr.message || insertErr);
+        }
+
+        // set cookie wrapper for newTid
+        const header = { alg: 'HS256', typ: 'JWT' };
+        const iat = Math.floor(Date.now()/1000);
+        const expWrapper = iat + REFRESH_MAX_AGE_SECONDS;
+        const payloadWrapper = { sub: userIdFromAccess, tid: newTid, iat, exp: expWrapper };
+        const toEncode = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+        const unsignedWrapper = `${toEncode(header)}.${toEncode(payloadWrapper)}`;
+        const sigWrapper = crypto.createHmac('sha256', process.env.REFRESH_TOKEN_SIGNING_KEY_HEX).update(unsignedWrapper).digest('base64url');
+        const newWrapper = `${unsignedWrapper}.${sigWrapper}`;
+        const cookie = makeRefreshCookie(newWrapper);
+        dbg('setting rotated refresh cookie (raw token flow) for newTid', { newTid });
+        res.setHeader('Set-Cookie', cookie);
+
+        dbg('returning accessToken to client (raw token flow)');
+        return res.status(200).json({ accessToken });
+      } catch (err) {
+        console.error('persist rotated refresh token error (raw token flow)', err);
+        dbg('persist rotated refresh token error (raw token flow)', err && err.message);
+      }
+    } catch (err) {
+      console.error('raw refresh token exchange error', err);
+      return res.status(500).json({ error: 'refresh_error' });
+    }
+  }
 
   // unwrap signed wrapper JWT to extract tidy id (tid) and user id (sub)
   const secret = process.env.REFRESH_TOKEN_SIGNING_KEY_HEX;
@@ -92,8 +192,6 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'refresh_expired' });
   }
   dbg('payload validated', { userId, tokenId, exp });
-
-  const sb = supabaseAdmin();
 
   // lookup token row
   const { data: rows, error: lookupErr } = await sb.from(refreshTokensTable).select('*').eq('id', tokenId).limit(1).maybeSingle();
