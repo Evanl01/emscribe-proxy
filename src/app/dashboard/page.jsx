@@ -470,6 +470,7 @@ const Dashboard = () => {
               width: "100%",
               margin: "0 auto",
             }}
+            className="responsive-grid"
           >
             {recentPatientEncounters.length === 0 ? (
               <div className="empty-state" style={{ gridColumn: "1 / -1" }}>
@@ -550,6 +551,7 @@ const Dashboard = () => {
               width: "100%",
               margin: "0 auto",
             }}
+            className="responsive-grid"
           >
             {recentSoapNotes.length === 0 ? (
               <div className="empty-state" style={{ gridColumn: "1 / -1" }}>

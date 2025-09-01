@@ -96,6 +96,7 @@ export default function ViewSoapNotes() {
             width: "100%",
             margin: "0 auto",
           }}
+          className="responsive-grid"
         >
           {sortedSoapNotes.length === 0 ? (
             <div className="empty-state" style={{ gridColumn: "1 / -1" }}>

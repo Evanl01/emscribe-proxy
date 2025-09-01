@@ -1,6 +1,6 @@
 "use client";
-import { redirect, useRouter } from "next/navigation";
-import React, { useState, useRef, useEffect } from "react";
+import { redirect, useRouter, useSearchParams } from "next/navigation";
+import React, { useState, useRef, useEffect, Suspense } from "react";
 import useWakeLock from "@/src/hooks/useWakeLock";
 import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
@@ -8,6 +8,7 @@ import * as format from "@/public/scripts/format.js";
 import * as validation from "@/public/scripts/validation.js";
 import * as background from "@/public/scripts/background.js";
 import { createClient } from "@supabase/supabase-js";
+import { createAuthClient } from "@/src/utils/supabase.js";
 import PatientEncounterPreviewOverlay from "@/src/components/PatientEncounterPreviewOverlay";
 import { record, set } from "zod";
 import ExportDataAsFileMenu from "@/src/components/ExportDataAsFileMenu.jsx";
@@ -18,8 +19,16 @@ let supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-export default function NewPatientEncounter() {
+function NewPatientEncounter() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Check for recordingPath URL parameter
+  const urlRecordingPath = searchParams.get('recordingPath');
+  
+  // State for URL-loaded recording
+  const [urlRecordingData, setUrlRecordingData] = useState(null);
+  const [loadingUrlRecording, setLoadingUrlRecording] = useState(false);
 
   // Wake lock hook - keep screen on during on-page recording
   const {
@@ -56,12 +65,6 @@ export default function NewPatientEncounter() {
     billingSuggestion: false,
   });
 
-  useEffect(() => {
-    if (!isUploading) {
-      getLocalStorageRecordingFile().then(setRecordingFileMetadata);
-    }
-  }, [currentStatus]);
-
   // For rich text editing
   const handleEditableChange = (setter) => (e) => {
     setter(e.target.innerHTML);
@@ -79,6 +82,14 @@ export default function NewPatientEncounter() {
     recordingFileMetadata: "emscribe_recordingFileMetadata", // <-- renamed from audioFileMetadata
     recordingFile: "emscribe_recordingFile", // (optional, if you use this elsewhere)
   };
+    // Load recording file from localStorage on page mount only
+  useEffect(() => {
+    // Only load from localStorage if there's no URL recording being processed
+    if (!urlRecordingPath && !loadingUrlRecording) {
+      getLocalStorageRecordingFile().then(setRecordingFileMetadata);
+    }
+  }, []); // Empty dependency array - runs only on mount
+
   // Restore from localStorage on mount and enable Section 2 if any field exists
   useEffect(() => {
     const name = localStorage.getItem(LS_KEYS.patientEncounterName) || "";
@@ -108,6 +119,80 @@ export default function NewPatientEncounter() {
       setSoapNoteRequested(true);
     }
   }, []);
+
+  // Handle URL recording parameter
+  useEffect(() => {
+    const loadRecordingFromUrl = async () => {
+      if (!urlRecordingPath) {
+        // No URL recording, allow localStorage loading
+        setLoadingUrlRecording(false);
+        return;
+      }
+      
+      setLoadingUrlRecording(true);
+      try {
+        const jwt = api.getJWT();
+        if (!jwt) {
+          throw new Error("User not authenticated");
+        }
+
+        // Create signed URL for the recording using authenticated client
+        const authClient = createAuthClient(jwt);
+        const { data, error } = await authClient.storage
+          .from("audio-files")
+          .createSignedUrl(urlRecordingPath, 60 * 60); // 1 hour expiry
+
+        if (error || !data?.signedUrl) {
+          console.error('Error creating signed URL for URL recording:', error);
+          alert('Failed to load recording from URL. Please try again or upload the file manually.');
+          setLoadingUrlRecording(false);
+          return;
+        }
+
+        // Extract filename from path
+        const fileName = urlRecordingPath.split("/").pop() || "recording";
+        
+        // Create metadata object similar to upload flow
+        const metadata = {
+          path: urlRecordingPath,
+          signedUrl: data.signedUrl,
+          name: fileName,
+          // Note: size and duration not available from URL, but path is most important
+          fromUrl: true // Flag to indicate this came from URL
+        };
+
+        // Store in localStorage like the upload flow does
+        localStorage.setItem(
+          LS_KEYS.recordingFileMetadata,
+          JSON.stringify(metadata)
+        );
+
+        // Set both URL recording data and recordingFileMetadata for consistency
+        setUrlRecordingData(metadata);
+        setRecordingFileMetadata(metadata);
+
+        // Note: We enable the SOAP note section but don't automatically open it
+        // User should stay on section 1 to see the loaded recording and click "Generate SOAP Note"
+        setSoapNoteRequested(true);
+        // Keep user on section 1 (upload) to see the loaded recording
+        
+        console.log('Loaded recording from URL and saved to localStorage:', {
+          path: urlRecordingPath,
+          fileName,
+          signedUrl: data.signedUrl,
+          metadata
+        });
+        
+      } catch (error) {
+        console.error('Error loading recording from URL:', error);
+        alert('Failed to load recording from URL. Please try again or upload the file manually.');
+      } finally {
+        setLoadingUrlRecording(false);
+      }
+    };
+
+    loadRecordingFromUrl();
+  }, [urlRecordingPath]); // Remove supabase from dependency array since it's stable
 
   // Save to localStorage on change
   useEffect(() => {
@@ -1187,17 +1272,16 @@ export default function NewPatientEncounter() {
       try {
         let recording_file_path = "";
 
-        // Check if we have existing uploaded file metadata with new key name
+        // Check if we have recording file metadata (works for both upload and URL flows)
         const metadataStr = localStorage.getItem(LS_KEYS.recordingFileMetadata);
-        // console.log("Using recording file metadata:", metadataStr);
-        // console.log("All LS data: ", { ...localStorage });
         if (metadataStr) {
-          // File was uploaded - use existing metadata
+          // File was uploaded or loaded from URL - use existing metadata
           const metadata = JSON.parse(metadataStr);
           if (!metadata.path) {
             throw new Error("Audio file path missing in metadata.");
           }
           recording_file_path = metadata.path;
+          console.log("Using recording path from localStorage:", recording_file_path, metadata.fromUrl ? "(from URL)" : "(from upload)");
         } else {
           throw new Error(
             "No audio file found. Please upload or record audio first."
@@ -1671,11 +1755,13 @@ export default function NewPatientEncounter() {
               </div>
 
               {(() => {
-                if (recordingFileMetadata || isUploading) {
+                if (recordingFileMetadata || isUploading || loadingUrlRecording) {
+                  const isLoading = isUploading || loadingUrlRecording;
+                  
                   return (
                     <div
                       className={`mt-6 p-4 rounded-lg border ${
-                        isUploading
+                        isLoading
                           ? "bg-gray-100 border-gray-300 opacity-60 pointer-events-none select-none"
                           : "bg-green-50 border-green-200"
                       }`}
@@ -1684,30 +1770,31 @@ export default function NewPatientEncounter() {
                         <div className="flex-1">
                           <p
                             className={`font-medium ${
-                              isUploading ? "text-gray-500" : "text-green-800"
+                              isLoading ? "text-gray-500" : "text-green-800"
                             }`}
                           >
-                            {isUploading
-                              ? "Uploading recording..."
-                              : "Recording Ready"}
+                            {isLoading
+                              ? loadingUrlRecording 
+                                ? "Loading recording from URL..." 
+                                : "Uploading recording..."
+                              : recordingFileMetadata?.fromUrl 
+                                ? "Recording Loaded from URL"
+                                : "Recording Ready"}
                           </p>
                           <p
                             className={`text-sm ${
-                              isUploading ? "text-gray-500" : "text-green-600"
+                              isLoading ? "text-gray-500" : "text-green-600"
                             }`}
                             data-path={recordingFileMetadata?.path || ""}
                           >
-                            {(recordingFileMetadata?.name || "recording.webm") +
-                              " (" +
-                              (
-                                (recordingFileMetadata?.size || 0) /
-                                (1024 * 1024)
-                              ).toFixed(1) +
-                              "MB)"}
+                            {recordingFileMetadata?.name || "recording.webm"}
+                            {recordingFileMetadata?.size && (
+                              ` (${((recordingFileMetadata.size || 0) / (1024 * 1024)).toFixed(1)}MB)`
+                            )}
                           </p>
 
-                          {/* Audio Player Controls - Hidden during upload */}
-                          {!isUploading && recordingFileMetadata?.signedUrl && (
+                          {/* Audio Player Controls - Hidden during upload/loading */}
+                          {!isLoading && recordingFileMetadata?.signedUrl && (
                             <div className="mt-4 flex items-center gap-2 flex-wrap">
                               <audio
                                 ref={audioPlayerRef}
@@ -1789,11 +1876,13 @@ export default function NewPatientEncounter() {
 
                         <button
                           onClick={generateSoapNote}
-                          disabled={isProcessing || isUploading}
+                          disabled={isProcessing || isUploading || loadingUrlRecording || !recordingFileMetadata}
                           className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-medium disabled:opacity-50"
                         >
                           {isProcessing
                             ? "Processing..."
+                            : loadingUrlRecording
+                            ? "Loading Recording..."
                             : "Generate SOAP Note"}
                         </button>
                       </div>
@@ -2105,3 +2194,21 @@ export default function NewPatientEncounter() {
     </>
   );
 }
+
+// Wrapper component with Suspense boundary for useSearchParams
+function NewPatientEncounterPage() {
+  return (
+    <Suspense fallback={
+      <div className="max-w-8xl mx-auto p-6">
+        <h1 className="text-3xl font-bold mb-8">New Patient Encounter</h1>
+        <div style={{ textAlign: "center", padding: "40px" }}>
+          <p>Loading...</p>
+        </div>
+      </div>
+    }>
+      <NewPatientEncounter />
+    </Suspense>
+  );
+}
+
+export default NewPatientEncounterPage;

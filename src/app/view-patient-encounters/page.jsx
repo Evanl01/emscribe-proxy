@@ -92,6 +92,7 @@ export default function ViewPatientEncounters() {
             width: "100%",
             margin: "0 auto",
           }}
+          className="responsive-grid"
         >
           {sortedEncounters.length === 0 ? (
             <div className="empty-state" style={{ gridColumn: "1 / -1" }}>

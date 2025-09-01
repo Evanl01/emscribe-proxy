@@ -6,12 +6,6 @@
   --foreground: #171717;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
 
 @media (prefers-color-scheme: dark) {
   :root {
@@ -157,5 +151,18 @@
 
   .copyright {
     margin-bottom: 0;
+  }
+}
+
+/* Responsive Grid Styles */
+@media (max-width: 1023px) {
+  .responsive-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .responsive-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
   }
 }

@@ -234,6 +234,12 @@ const Header = () => {
       ],
     },
     {
+      category: "Recordings",
+      items: [
+        { name: "View Recordings", path: "/view-recordings" },
+      ],
+    },
+    {
       category: "Soap Notes",
       items: [
         // { name: "New Soap Note", path: "/new-soap-note" },

@@ -18,13 +18,66 @@ export default async function handler(req, res) {
         if (!id) {
             return res.status(400).json({ error: 'Recording ID is required' });
         }
-        const { data, error } = await supabase //Only fetch SOAP notes for the authenticated user
+        const { data, error } = await supabase //Only fetch recordings for the authenticated user
             .from(recordingTableName)
             .select('*') // Select all fields
             .eq('id', id)
-            .order('created_at', { ascending: false });
-        // console.log('Fetched recordings:', data);
+            .eq('user_id', user.id) // Ensure user can only access their own recordings
+            .single(); // Use single() since we're querying by ID
+        
         if (error) return res.status(500).json({ error: error.message });
+        if (!data) return res.status(404).json({ error: 'Recording not found' });
+
+        // Check if we need to generate a new signed URL
+        const needNewSignedUrl = !data.recording_file_signed_url || 
+                                 new Date(data.recording_file_signed_url_expiry) < new Date();
+        
+        console.log('Generating signed URL for recording:', data.id, 'needNewSignedUrl:', needNewSignedUrl);
+        
+        if (data.recording_file_path && needNewSignedUrl) {
+            // Normalize path: strip optional bucket prefix and any leading slash
+            let normalizedPath = data.recording_file_path;
+            if (normalizedPath.startsWith('audio-files/')) {
+                normalizedPath = normalizedPath.replace(/^audio-files\//, '');
+            }
+            if (normalizedPath.startsWith('/')) normalizedPath = normalizedPath.slice(1);
+            
+            console.log('Creating signed URL for recording file:', normalizedPath);
+            const expirySeconds = 60 * 60; // 1 hour expiry
+
+            const { data: signedUrlData, error: signedError } = await supabase.storage
+                .from('audio-files')
+                .createSignedUrl(normalizedPath, expirySeconds);
+                
+            if (signedError) {
+                console.error('Signed URL error:', signedError);
+                return res.status(500).json({ error: 'Failed to create signed URL: ' + signedError.message });
+            }
+
+            const now = new Date();
+            const expiresAt = new Date(now.getTime() + expirySeconds * 1000).toISOString();
+
+            // Update the recording with the new signed URL and expiry
+            const { data: updateData, error: updateError } = await supabase
+                .from(recordingTableName)
+                .update({
+                    recording_file_signed_url: signedUrlData.signedUrl,
+                    recording_file_signed_url_expiry: expiresAt
+                })
+                .eq('id', data.id)
+                .select()
+                .single();
+                
+            if (updateError) {
+                console.error('Error updating recording signed URL:', updateError.message);
+                return res.status(500).json({ error: updateError.message });
+            }
+            
+            // Return the updated data with new signed URL
+            return res.status(200).json(updateData);
+        }
+        
+        // Return existing data if signed URL is still valid
         return res.status(200).json(data);
     }
 
