@@ -275,10 +275,10 @@ const Header = () => {
             }}
           >
             <Image
-              src="/icon128.png"
+              src="/emscribe-icon128.png"
               alt="EmScribe Logo"
-              width={32}
-              height={32}
+              width={20}
+              height={20}
               style={{ marginRight: "0.75rem" }}
             />
             <AppTitle style={{ margin: 0, color: "#333333" }}>

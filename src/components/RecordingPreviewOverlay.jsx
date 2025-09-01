@@ -71,8 +71,8 @@ export default function RecordingPreviewOverlay({
         </div>
         
         <div style={{ marginBottom: "20px" }}>
-          <h3 style={{ marginBottom: "10px" }}>{getRecordingName(selectedRecording.path)}</h3>
-          <p><strong>File Path:</strong> {selectedRecording.path}</p>
+          <h3 ><strong>Name:</strong> {getRecordingName(selectedRecording.path)}</h3>
+          {/* <p><strong>File Path:</strong> {selectedRecording.path}</p> */}
           <p><strong>Size:</strong> {formatFileSize(selectedRecording.size)}</p>
           <p><strong>Created:</strong> {selectedRecording.created_at ? format.formatTimestamp(selectedRecording.created_at) : "Unknown"}</p>
           {selectedRecording.patientEncounter && (
@@ -81,7 +81,7 @@ export default function RecordingPreviewOverlay({
         </div>
         
         <div style={{ 
-          padding: "8px", 
+          padding: "4px", 
           backgroundColor: "#f3f4f6", 
           borderRadius: "8px"
         }}>
@@ -184,7 +184,7 @@ export default function RecordingPreviewOverlay({
                 onMouseOver={(e) => !deletingRecording && (e.target.style.backgroundColor = "#dc2626")}
                 onMouseOut={(e) => !deletingRecording && (e.target.style.backgroundColor = "#ef4444")}
               >
-                {deletingRecording ? "Deleting..." : "🗑️ Delete Recording"}
+                {deletingRecording ? "Deleting..." : "Delete Recording"}
               </button>
             </div>
           )}

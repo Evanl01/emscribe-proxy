@@ -13,9 +13,8 @@ export default function ViewRecordings() {
   const [unattachedRecordings, setUnattachedRecordings] = useState([]);
   const [attachedSortBy, setAttachedSortBy] = useState("name");
   const [unattachedSortBy, setUnattachedSortBy] = useState("name");
-  // Accordion open state (both open by default)
-  const [attachedOpen, setAttachedOpen] = useState(true);
-  const [unattachedOpen, setUnattachedOpen] = useState(true);
+  // Active tab: 'attached' or 'unattached'
+  const [activeTab, setActiveTab] = useState("attached");
   const [loading, setLoading] = useState(true);
   const [selectedRecording, setSelectedRecording] = useState(null);
   const [recordingData, setRecordingData] = useState(null);
@@ -346,118 +345,104 @@ export default function ViewRecordings() {
           </div>
         ) : (
           <>
-            {/* Attached Recordings Accordion (open by default) */}
-            <div className="border border-gray-200 rounded-lg mb-4">
+            {/* Tabs for Attached / Unattached Recordings (dashboard style) */}
+            <div className="tabs" style={{ display: "flex", borderBottom: "2px solid #e0e0e0", marginBottom: "20px", backgroundColor: "#f8f9fa" }}>
               <button
-                className="w-full p-4 text-left bg-gray-50 hover:bg-gray-100 flex justify-between items-center"
-                onClick={() => setAttachedOpen((s) => !s)}
+                className={`tab-btn${activeTab === 'attached' ? ' active' : ''}`}
+                onClick={() => setActiveTab('attached')}
+                style={{ flex: 1, padding: '12px 20px', border: 'none', backgroundColor: activeTab === 'attached' ? '#007bff' : 'transparent', color: activeTab === 'attached' ? 'white' : '#495057', cursor: 'pointer', fontSize: '14px', fontWeight: '500', borderBottom: activeTab === 'attached' ? '3px solid #0056b3' : '3px solid transparent', transition: 'all 0.3s ease' }}
               >
-                <div className="flex items-center gap-3">
-                  <span className="text-lg font-semibold">Attached Recordings</span>
-                  <span className="text-sm text-gray-600">({attachedRecordings.length})</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="attachedSortBy" className="text-sm font-medium text-gray-700">Sort by</label>
-                    <select
-                      id="attachedSortBy"
-                      value={attachedSortBy}
-                      onChange={(e) => handleAttachedSortChange(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="border-gray-300 rounded px-2 py-1 text-sm"
-                    >
-                      <option value="name">A-Z</option>
-                      <option value="created_at">Date Created</option>
-                      <option value="updated_at">Date Updated</option>
-                    </select>
-                  </div>
-                  <span className="text-xl">{attachedOpen ? '−' : '+'}</span>
-                </div>
+                🎵 Attached ({attachedRecordings.length})
               </button>
-
-              {attachedOpen && (
-                <div className="p-6 border-t border-gray-200">
-                  <div className="responsive-grid"
-                    id="attachedRecordings"
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(5, 1fr)",
-                      gap: "20px",
-                      width: "100%",
-                      margin: "0 auto",
-                    }}
-                  >
-                    {attachedRecordings.length === 0 ? (
-                      <div className="empty-state" style={{ gridColumn: "1 / -1" }}>
-                        <div className="empty-icon">🎵</div>
-                        <div className="empty-text">No attached recordings found</div>
-                      </div>
-                    ) : (
-                      attachedRecordings.map((recording) => (
-                        <RecordingCard key={recording.path} recording={recording} isAttached={true} />
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Unattached Recordings Accordion (open by default) */}
-            <div className="border border-gray-200 rounded-lg mb-4 mt-6">
               <button
-                className="w-full p-4 text-left bg-gray-50 hover:bg-gray-100 flex justify-between items-center"
-                onClick={() => setUnattachedOpen((s) => !s)}
+                className={`tab-btn${activeTab === 'unattached' ? ' active' : ''}`}
+                onClick={() => setActiveTab('unattached')}
+                style={{ flex: 1, padding: '12px 20px', border: 'none', backgroundColor: activeTab === 'unattached' ? '#007bff' : 'transparent', color: activeTab === 'unattached' ? 'white' : '#495057', cursor: 'pointer', fontSize: '14px', fontWeight: '500', borderBottom: activeTab === 'unattached' ? '3px solid #0056b3' : '3px solid transparent', transition: 'all 0.3s ease' }}
               >
-                <div className="flex items-center gap-3">
-                  <span className="text-lg font-semibold">Unattached Recordings</span>
-                  <span className="text-sm text-gray-600">({unattachedRecordings.length})</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="unattachedSortBy" className="text-sm font-medium text-gray-700">Sort by</label>
-                    <select
-                      id="unattachedSortBy"
-                      value={unattachedSortBy}
-                      onChange={(e) => handleUnattachedSortChange(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="border-gray-300 rounded px-2 py-1 text-sm"
-                    >
-                      <option value="name">A-Z</option>
-                      <option value="created_at">Date Created</option>
-                      <option value="updated_at">Date Updated</option>
-                    </select>
-                  </div>
-                  <span className="text-xl">{unattachedOpen ? '−' : '+'}</span>
-                </div>
+                🎵 Unattached ({unattachedRecordings.length})
               </button>
-
-              {unattachedOpen && (
-                <div className="p-6 border-t border-gray-200">
-                  <div className="responsive-grid"
-                    id="unattachedRecordings"
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(5, 1fr)",
-                      gap: "20px",
-                      width: "100%",
-                      margin: "0 auto",
-                    }}
-                  >
-                    {unattachedRecordings.length === 0 ? (
-                      <div className="empty-state" style={{ gridColumn: "1 / -1" }}>
-                        <div className="empty-icon">🎵</div>
-                        <div className="empty-text">No unattached recordings found</div>
-                      </div>
-                    ) : (
-                      unattachedRecordings.map((recording) => (
-                        <RecordingCard key={recording.path} recording={recording} isAttached={false} />
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
           </>
+        )}
+
+        {/* Attached recordings tab content */}
+        {!loading && activeTab === 'attached' && (
+          <div className="tab-content" style={{ display: activeTab === 'attached' ? 'block' : 'none' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div />
+              <div className="flex items-center gap-2">
+                <label htmlFor="attachedSortBy" className="text-sm font-medium text-gray-700">Sort by</label>
+                <select
+                  id="attachedSortBy"
+                  value={attachedSortBy}
+                  onChange={(e) => handleAttachedSortChange(e.target.value)}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="name">A-Z</option>
+                  <option value="created_at">Date Created</option>
+                  <option value="updated_at">Date Updated</option>
+                </select>
+              </div>
+            </div>
+            <div className="responsive-grid" id="attachedRecordings" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '20px', width: '100%', margin: '0 auto' }}>
+              {attachedRecordings.length === 0 ? (
+                <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
+                  <div className="empty-icon">🎵</div>
+                  <div className="empty-text">No attached recordings found</div>
+                </div>
+              ) : (
+                attachedRecordings.map((recording) => (
+                  <RecordingCard key={recording.path} recording={recording} isAttached={true} />
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Unattached recordings tab content */}
+        {!loading && activeTab === 'unattached' && (
+          <div className="tab-content" style={{ display: activeTab === 'unattached' ? 'block' : 'none' }}>
+            {/* Data retention notice */}
+            <div style={{ 
+              backgroundColor: '#fef3c7', 
+              border: '1px solid #f59e0b', 
+              borderRadius: '8px', 
+              padding: '12px 16px', 
+              marginBottom: '16px',
+              fontSize: '14px',
+              color: '#92400e'
+            }}>
+              ⚠️ These recordings have not been linked to a patient encounter. Please review and attach them, otherwise they will be removed per our data retention policy.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div />
+              <div className="flex items-center gap-2">
+                <label htmlFor="unattachedSortBy" className="text-sm font-medium text-gray-700">Sort by</label>
+                <select
+                  id="unattachedSortBy"
+                  value={unattachedSortBy}
+                  onChange={(e) => handleUnattachedSortChange(e.target.value)}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="name">A-Z</option>
+                  <option value="created_at">Date Created</option>
+                  <option value="updated_at">Date Updated</option>
+                </select>
+              </div>
+            </div>
+            <div className="responsive-grid" id="unattachedRecordings" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '20px', width: '100%', margin: '0 auto' }}>
+              {unattachedRecordings.length === 0 ? (
+                <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
+                  <div className="empty-icon">🎵</div>
+                  <div className="empty-text">No unattached recordings found</div>
+                </div>
+              ) : (
+                unattachedRecordings.map((recording) => (
+                  <RecordingCard key={recording.path} recording={recording} isAttached={false} />
+                ))
+              )}
+            </div>
+          </div>
         )}
       </div>
 
