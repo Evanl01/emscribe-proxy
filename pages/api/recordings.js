@@ -11,14 +11,24 @@ export default async function handler(req, res) {
     if (authError) return res.status(401).json({ error: authError });
 
     // GET: ------------------------------------------------------------------------------
-    // GET: List all audio files for this user
+    // GET: List all audio files for this user (batch) or single recording by ID
     if (req.method === 'GET') {
-        // console.log('Fetched recordings for user:', user.id, "with JWT:", req.headers.authorization);
         const id = req.query.id; // Optional ID for filtering
+        
         if (!id) {
-            return res.status(400).json({ error: 'Recording ID is required' });
+            // Batch mode: List all recordings for this user
+            const { data, error } = await supabase
+                .from(recordingTableName)
+                .select('*') // Select all fields
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false });
+            
+            if (error) return res.status(500).json({ error: error.message });
+            return res.status(200).json(data);
         }
-        const { data, error } = await supabase //Only fetch recordings for the authenticated user
+        
+        // Single recording mode: Get specific recording by ID
+        const { data, error } = await supabase
             .from(recordingTableName)
             .select('*') // Select all fields
             .eq('id', id)

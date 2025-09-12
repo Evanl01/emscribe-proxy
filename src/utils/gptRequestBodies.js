@@ -64,7 +64,7 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
             },
             {
                 role: "user",
-                content: `Here is a patient encounter transcript:\n\n${transcript}\n\nGenerate SOAP note and billing suggestions. PHI information has been masked for privacy, e.g. Evan is 13 years old --> {{NAME_1}} is {{AGE_2}} years old.
+                content: `Here is a patient encounter transcript:\n\n${transcript}\n\nGenerate SOAP note and billing suggestions. PHI information has been masked for privacy. Example (for reference only): Evan is 105 years old --> {{NAME_1}} is {{AGE_2}} years old.
                 Use bullet points (marked by '-' symbols, '•' is invalid symbol) and markdown formatting and "\\n"for clarity.`
             }
         ],
@@ -107,7 +107,7 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                                     propertyOrdering: ["HEENT", "General", "Cardiovascular", "Musculoskeletal", "Other"]
                                 },
                                 assessment: { type: SchemaType.STRING, description: "Clinical assessment and diagnosis based on subjective and objective findings" },
-                                plan: { type: SchemaType.STRING, description: "Treatment plan, medications, follow-up instructions and next steps" }
+                                plan: { type: SchemaType.STRING, description: "Based solely on the transcript, summarize a treatment plan, medications, follow-up instructions and next steps. Do not include your own assumptions or inferences, and only output data if present in the transcript, otherwise leave it blank." }
                             },
                             required: ["subjective", "objective", "assessment", "plan"]
                         },

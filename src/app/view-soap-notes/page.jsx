@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import * as api from "@/public/scripts/api.js";
 import * as format from "@/public/scripts/format.js";
 import Auth from "@/src/components/Auth.jsx";
+import parseSoapNotes from "@/src/utils/parseSoapNotes";
 
 export default function ViewSoapNotes() {
   const router = useRouter();
@@ -31,7 +32,7 @@ export default function ViewSoapNotes() {
           return;
         }
         const data = await response.json();
-        const parsedSoapNotes = format.parseSoapNotes(data);
+        const parsedSoapNotes = parseSoapNotes(data);
         setSoapNotes(parsedSoapNotes);
         console.log("Fetched SOAP notes:", parsedSoapNotes);
       } catch (error) {

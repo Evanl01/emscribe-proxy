@@ -111,7 +111,7 @@ export const fetchWithRefresh = async (input, init = {}) => {
 export const getAllTranscripts = async () => {
   const jwt = getJWT();
   try {
-    const res = await fetch(`${API_BASE}/api/transcripts/batch`, {
+    const res = await fetch(`${API_BASE}/api/transcripts`, {
       headers: { 'Authorization': `Bearer ${jwt}` }
     });
 

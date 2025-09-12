@@ -5,6 +5,7 @@ import * as api from "@/public/scripts/api.js";
 import * as ui from "@/public/scripts/ui.js";
 import * as format from "@/public/scripts/format.js";
 import * as validation from "@/public/scripts/validation.js";
+import parseSoapNotes from "@/src/utils/parseSoapNotes";
 import Auth from "@/src/components/Auth";
 
 const Dashboard = () => {
@@ -168,7 +169,7 @@ const Dashboard = () => {
       }
 
       const data = await response.json();
-      const parsedSoapNotes = format.parseSoapNotes(data);
+      const parsedSoapNotes = parseSoapNotes(data);
       console.log("Fetched soapNotes:", parsedSoapNotes);
 
       // Set the full data for stats

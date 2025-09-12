@@ -7,6 +7,7 @@ import th from 'zod/v4/locales/th.cjs';
 import { json, record } from 'zod';
 import * as encryptionUtils from '@/src/utils/encryptionUtils';
 import * as format from '@/public/scripts/format';
+import parseSoapNotes from '@/src/utils/parseSoapNotes';
 
 const patientEncounterTable = 'patientEncounters';
 const soapNoteTable = 'soapNotes';
@@ -152,12 +153,15 @@ export default async function handler(req, res) {
                     console.error('Failed to decrypt SOAP note:', soapNote.id, ". Error:", decryptSoapNoteResult.error);
                     return res.status(400).json({ error: decryptSoapNoteResult.error });
                 }
-                
                 try {
-                    soapNote.soapNote_text = JSON.parse(soapNote.soapNote_text);
-                } catch (parseErr) {
-                    console.error("Decryption succeeded but JSON parse of SOAP Note failed:", parseErr);
-                    return null;
+                    // Remove bad control characters except for \n, \r, \t
+
+                    soapNote.soapNote_text = parseSoapNotes(soapNote.soapNote_text);
+                    // console.log('Parsed SOAP note:', soapNote.id, "Data:", soapNote);
+                    // soapNote.soapNote_text = JSON.parse(cleaned);
+                } catch (e) {
+                    console.error('Decryption succeeded but JSON parse of SOAP Note failed:', e);
+                    return res.status(400).json({ error: 'Failed to parse soapNote_text' });
                 }
             }
             //Step 4: Decrypt all encrypted fields
@@ -263,7 +267,7 @@ export default async function handler(req, res) {
         patientEncounter.encrypted_aes_key = encryptionUtils.encryptAESKey(aesKey);
 
         // 3. Encrypt patientEncounter fields and preprocess
-        console.log('Patient Encounter to encrypt:', patientEncounter, "And name:", req.body.patientEncounter.name);
+        // console.log('Patient Encounter to encrypt:', patientEncounter, "And name:", req.body.patientEncounter.name);
         if (req.body.patientEncounter.name) {
             patientEncounter.encrypted_name = encryptionUtils.encryptText(req.body.patientEncounter.name, aesKey, encounterIV);
         }
@@ -332,7 +336,7 @@ export default async function handler(req, res) {
                     throw new Error('Invalid JSON format for soapNote_text');
                 }
             }
-            console.log('SOAP Note text object to encrypt:', soapNote_textObject);
+            // console.log('SOAP Note text object to encrypt:', soapNote_textObject);
             const soapNoteObject = {
                 iv: soapNoteIV,
                 encrypted_soapNote_text: soapNote_textObject

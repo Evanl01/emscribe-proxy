@@ -9,6 +9,7 @@ import ExportDataAsFileMenu from "@/src/components/ExportDataAsFileMenu";
 import id from "zod/v4/locales/id.cjs";
 import Auth from "@/src/components/Auth.jsx";
 import CopyToClipboard from '@/src/components/CopyToClipboard.jsx';
+import parseSoapNotes from "@/src/utils/parseSoapNotes";
 
 function EditSoapNoteInner() {
   const router = useRouter();
@@ -57,7 +58,7 @@ function EditSoapNoteInner() {
           );
         }
         let data = await soapNoteRes.json();
-        data = format.parseSoapNotes(data);
+        data = parseSoapNotes(data);
         if (!data) throw new Error("SOAP note not found");
 
         // 2. Set SOAP note fields

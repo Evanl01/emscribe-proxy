@@ -3,6 +3,7 @@ import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { soapNoteSchema } from '@/src/app/schemas';
 import { decryptField, encryptionUtils } from '@/src/utils/encryptionUtils';
 import * as format from '@/public/scripts/format';
+import parseSoapNotes from '@/src/utils/parseSoapNotes';
 
 const soapNoteTableName = 'soapNotes';
 
@@ -41,7 +42,7 @@ export default async function handler(req, res) {
       try {
         // Remove bad control characters except for \n, \r, \t
 
-        soapNote.soapNote_text = format.parseSoapNotes(soapNote.soapNote_text);
+        soapNote.soapNote_text = parseSoapNotes(soapNote.soapNote_text);
         // console.log('Parsed SOAP note:', soapNote.id, "Data:", soapNote);
         // soapNote.soapNote_text = JSON.parse(cleaned);
       } catch (e) {

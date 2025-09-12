@@ -53,7 +53,7 @@ export async function mask_phi(transcript, mask_threshold = 0.15) {
     masked_transcript: maskedTranscript,
     phi_entities: allEntities,
     skipped_entities: [], // Could aggregate if needed
-    mask_threshold: mask_threshold !== undefined ? Number(mask_threshold) : Number(process.env.MASK_THRESHOLD ?? 0.5),
+    mask_threshold: mask_threshold !== undefined ? Number(mask_threshold) : 0.15,
     chunks_processed: chunks.length
   };
 }
@@ -111,7 +111,7 @@ async function processSingleChunk(transcript, mask_threshold = 0.15) {
   const threshold =
     mask_threshold !== undefined
       ? Number(mask_threshold)
-      : Number(process.env.MASK_THRESHOLD ?? 0.5);
+      : 0.15;
 
   // Normalize and attach an Id for each entity. Use existing Id if provided by the SDK,
   // otherwise generate a sequential id (per entity) so replacement tokens are stable.

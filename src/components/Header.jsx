@@ -246,6 +246,13 @@ const Header = () => {
         { name: "View Soap Notes", path: "/view-soap-notes" },
       ],
     },
+    {
+      category: "Additional Tools",
+      items: [
+        // { name: "New Soap Note", path: "/new-soap-note" },
+        { name: "Dot Phrases", path: "/dot-phrases" },
+      ],
+    },
   ];
 
 

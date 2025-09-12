@@ -247,7 +247,7 @@ export default async function handler(req, res) {
         const phiEntities = transcriptResult.maskResult.phi_entities;
         const transcribe_end_time = Date.now(); // Use numeric timestamp
         
-        console.log('Transcription Result:', transcriptResult);
+        console.log('Transcription Result:', JSON.stringify(transcriptResult, null, 2));
         console.log('[transcribe_and_mask] Total time: ', (transcribe_end_time - start_time) / 1000, 's');
         response.status = 'transcription complete';
         response.message = 'Transcription complete!';

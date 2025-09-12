@@ -42,6 +42,21 @@ async function encryptTranscriptText(supabase, transcript) {
     return { success: true, error: null, transcript };
 }
 
+// Helper function to decrypt transcript_text
+async function decryptTranscriptText(transcript) {
+    const encryptedAESKey = transcript.recording?.patientEncounter?.encrypted_aes_key || null;
+    const decryptFieldResult = await encryptionUtils.decryptField(transcript, 'transcript_text', encryptedAESKey);
+
+    if (!decryptFieldResult.success) {
+        console.error('Failed to decrypt transcript:', transcript.id, '. Error:', decryptFieldResult.error);
+        return { success: false, error: decryptFieldResult.error };
+    }
+
+    // Clean up joined fields
+    delete transcript.recording;
+    return { success: true, transcript };
+}
+
 export default async function handler(req, res) {
     const supabase = getSupabaseClient(req.headers.authorization);
     // Authenticate user for all methods
@@ -51,18 +66,48 @@ export default async function handler(req, res) {
     // GET ---------------------------------------------------------
     if (req.method === 'GET') {
         const id = req.query.id;
-        if (!id) return res.status(400).json({ error: 'id is required' });
+        
+        if (!id) {
+            // Batch mode: Get all transcripts for this user
+            const { data, error } = await supabase
+                .from(transcriptTable)
+                .select(`
+                    *,
+                    recording:recording_id (
+                        id,
+                        patientEncounter:patientEncounter_id (
+                            encrypted_aes_key
+                        )
+                    )
+                `)
+                .eq('user_id', user.id)
+                .order('updated_at', { ascending: false });
+
+            if (error) return res.status(500).json({ error: error.message });
+
+            // Decrypt transcript_text for each transcript
+            for (let transcript of data) {
+                const decryptionResult = await decryptTranscriptText(transcript);
+                if (!decryptionResult.success) {
+                    return res.status(400).json({ error: decryptionResult.error });
+                }
+            }
+
+            return res.status(200).json(data);
+        }
+        
+        // Single transcript mode: Get specific transcript by ID
         const { data, error } = await supabase
             .from(transcriptTable)
             .select(`
-        *,
-        recording:recording_id (
-            id,
-            patientEncounter:patientEncounter_id (
-                encrypted_aes_key
-            )
-        )
-    `)
+                *,
+                recording:recording_id (
+                    id,
+                    patientEncounter:patientEncounter_id (
+                        encrypted_aes_key
+                    )
+                )
+            `)
             .eq('id', id)
             .eq('user_id', user.id)
             .single(); // Get a single record
@@ -71,12 +116,12 @@ export default async function handler(req, res) {
         if (!data || data.length === 0) {
             return res.status(404).json({ error: 'Transcript not found' });
         }
-        const decryptFieldsResult = await encryptionUtils.decryptField(data, 'transcript_text', data.recording?.patientEncounter?.encrypted_aes_key);
-        if (!decryptFieldsResult.success) {
-            console.error('Failed to decrypt transcript:', id, ". Error:", decryptFieldsResult.error);
-            return res.status(400).json({ error: decryptFieldsResult.error });
+
+        const decryptionResult = await decryptTranscriptText(data);
+        if (!decryptionResult.success) {
+            return res.status(400).json({ error: decryptionResult.error });
         }
-        delete data.recording; // Clean up sensitive data
+
         return res.status(200).json(data);
     }
 

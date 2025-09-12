@@ -3,7 +3,7 @@ import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { soapNoteSchema } from '@/src/app/schemas';
 import * as encryptionUtils from '@/src/utils/encryptionUtils';
 import * as format from '@/public/scripts/format';
-
+import parseSoapNotes from '@/src/utils/parseSoapNotes';
 const soapNoteTable = 'soapNotes';
 const patientEncounterTable = 'patientEncounters';
 
@@ -74,7 +74,7 @@ export default async function handler(req, res) {
     delete data.patientEncounter; // Clean up joined field
     console.log('Decrypted SOAP Note:', data); 
     try {
-      data.soapNote_text = format.parseSoapNotes(data.soapNote_text);
+      data.soapNote_text = parseSoapNotes(data.soapNote_text);
       console.log('Parsed SOAP Note text:', data.soapNote_text);
       // data.soapNote_text = JSON.parse(data.soapNote_text);
     } catch (parseErr) {

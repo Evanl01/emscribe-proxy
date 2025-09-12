@@ -10,6 +10,7 @@ import no from "zod/v4/locales/no.cjs";
 import ExportDataAsFileMenu from "@/src/components/ExportDataAsFileMenu.jsx";
 import Auth from "@/src/components/Auth.jsx";
 import CopyToClipboard from '@/src/components/CopyToClipboard.jsx';
+import parseSoapNotes from "@/src/utils/parseSoapNotes";
 
 function EditPatientEncounterInner() {
   const router = useRouter();
@@ -111,7 +112,7 @@ function EditPatientEncounterInner() {
 
         // Parse soapNote_text if present
         if (data.soapNotes) {
-          const parsedSoapNotes = format.parseSoapNotes(data.soapNotes);
+          const parsedSoapNotes = parseSoapNotes(data.soapNotes);
           setAssociatedSoapNotes(parsedSoapNotes);
         }
       } catch (error) {
