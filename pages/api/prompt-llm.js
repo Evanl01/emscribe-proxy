@@ -5,7 +5,7 @@ import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { recordingSchema } from '@/src/app/schemas';
 import * as geminiRequestBodies from '@/src/utils/geminiRequestBodies'; // Adjust the import path as needed
 import * as gptRequestBodies from '@/src/utils/gptRequestBodies'; // Adjust the import path as needed
-import { transcribe_and_mask } from '@/pages/api/gcp/transcribe/complete'; // Import the transcribe_and_mask function
+import * as transcribe_complete from '@/pages/api/gcp/transcribe/complete';
 import { unmask_phi } from '@/pages/api/aws/mask-phi';
 import { sendApiError, sendSseError } from '@/src/utils/apiErrorResponse';
 import ca from 'zod/v4/locales/ca.cjs';
@@ -218,13 +218,13 @@ export default async function handler(req, res) {
         // Transcribe audio using cloud GCP and mask with AWS Comprehend medical
         let transcriptResult;
         const start_time = Date.now(); // Use numeric timestamp instead of ISO string
-        console.log("[transcribe_and_mask] Start time: ", new Date(start_time).toISOString());
+        console.log("[transcribe_expand_mask] Start time: ", new Date(start_time).toISOString());
         try {
-            transcriptResult = await transcribe_and_mask({ recording_file_signed_url, req, user });
+            transcriptResult = await transcribe_complete.transcribe_expand_mask({ recording_file_signed_url, req });
         }
         catch (error) {
             // Log full error + stack so backend logs show root cause
-            console.error('transcribe_and_mask error:', error?.message || error);
+            console.error('transcribe_expand_mask error:', error?.message || error);
             console.error(error?.stack || error);
             sendSseError(res, 500,  `Transcription failed: ${error?.message || 'Unknown error'}`);
             return;
@@ -242,13 +242,13 @@ export default async function handler(req, res) {
             console.error('Transcription result is missing expected properties:', transcriptResult);
             return sendApiError(res, 400, 'transcription_invalid', 'Failed to create transcript. Please try again.');
         }
-        const transcript = transcriptResult.cloudRunData.transcript;
-        const maskedTranscript = transcriptResult.maskResult.masked_transcript;
+        const transcript = transcriptResult.expandedTranscript; // Clean transcript with dot phrase expansions for user
+        const maskedTranscript = transcriptResult.maskResult.masked_transcript; // Masked LLM-notated version for processing
         const phiEntities = transcriptResult.maskResult.phi_entities;
         const transcribe_end_time = Date.now(); // Use numeric timestamp
         
         console.log('Transcription Result:', JSON.stringify(transcriptResult, null, 2));
-        console.log('[transcribe_and_mask] Total time: ', (transcribe_end_time - start_time) / 1000, 's');
+        console.log('[transcribe_expand_mask] Total time: ', (transcribe_end_time - start_time) / 1000, 's');
         response.status = 'transcription complete';
         response.message = 'Transcription complete!';
         // Send message, with additional 'data' field for transcript

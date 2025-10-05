@@ -1303,16 +1303,23 @@ function NewPatientEncounter() {
           setIsProcessing(false);
 
           let errorMessage = `Server error: ${response.status} ${response.statusText}`;
-          // setCurrentStatus({
-          //   status: "error",
-          //   message: errorMessage,
-          // });
+          setCurrentStatus({
+            status: "error",
+            message: errorMessage,
+          });
           try {
             const errorData = await response.text();
             if (errorData) {
               errorMessage += `\n${errorData}`;
+              // Update status with more detailed error message
+              setCurrentStatus({
+                status: "error",
+                message: errorMessage,
+              });
             }
-          } catch (e) {}
+          } catch (e) {
+            console.warn("Could not read error response body:", e);
+          }
           throw new Error(errorMessage);
         }
 
@@ -1323,9 +1330,18 @@ function NewPatientEncounter() {
         // Rest of the streaming response handling remains the same...
         const reader = response.body.getReader();
         let buffer = "";
+        let receivedComplete = false; // Track if we received a completion signal
+        
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            // Stream ended - check if we received a completion signal
+            if (!receivedComplete) {
+              throw new Error("Stream ended unexpectedly without completion signal");
+            }
+            break;
+          }
+          
           const chunk = new TextDecoder().decode(value);
           buffer += chunk;
           const lines = buffer.split("\n");
@@ -1362,6 +1378,7 @@ function NewPatientEncounter() {
                     jsonData.status === "soap note complete" &&
                     jsonData.data
                   ) {
+                    receivedComplete = true; // Mark as completed
                     let noteObj = {};
                     let billingObj = {};
                     try {
@@ -1425,7 +1442,7 @@ function NewPatientEncounter() {
                         LS_KEYS.patientEncounterName,
                         patientEncounterName
                       );
-                      localStorage.setItem(LS_KEYS.transcript, transcript);
+                      localStorage.setItem(LS_KEYS.transcript, jsonData.data.transcript);
                       localStorage.setItem(
                         LS_KEYS.soapSubjective,
                         soapSubjectiveText
