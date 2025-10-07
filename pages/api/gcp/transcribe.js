@@ -54,15 +54,74 @@ export async function transcribe_recording({ recording_file_signed_url, req = nu
   });
   const idClient = await auth.getIdTokenClient(CLOUD_RUN_URL);
 
-  const cloudRunResp = await idClient.request({
-    url: CLOUD_RUN_URL,
-    method: "POST",
-    data: { recording_file_signed_url },
-    headers: { "Content-Type": "application/json" },
-    timeout: 120000,
-  });
-  console.log("Cloud Run response:", cloudRunResp.status, cloudRunResp.data);
-  return cloudRunResp.data;
+  try {
+    console.log('[transcribe_recording] Making request to Cloud Run...');
+    const cloudRunResp = await idClient.request({
+      url: CLOUD_RUN_URL,
+      method: "POST",
+      data: { recording_file_signed_url },
+      headers: { "Content-Type": "application/json" },
+      timeout: 300000, // Increased to 5 minutes
+    });
+
+    // Enhanced debugging - check what we actually got back
+    console.log("Cloud Run response received:");
+    console.log("- typeof cloudRunResp:", typeof cloudRunResp);
+    console.log("- cloudRunResp keys:", Object.keys(cloudRunResp || {}));
+    console.log("- status:", cloudRunResp?.status);
+    console.log("- statusText:", cloudRunResp?.statusText);
+    console.log("- headers:", cloudRunResp?.headers);
+    console.log("- data exists:", !!cloudRunResp?.data);
+    console.log("- data type:", typeof cloudRunResp?.data);
+
+    // Try to safely stringify the entire response
+    try {
+      console.log("- Full response (JSON):", JSON.stringify(cloudRunResp, null, 2));
+    } catch (stringifyError) {
+      console.log("- Could not stringify response:", stringifyError.message);
+      console.log("- Raw response object:", cloudRunResp);
+    }
+
+    // Only log data details if data exists
+    if (cloudRunResp?.data) {
+      console.log("- Data length:", JSON.stringify(cloudRunResp.data).length);
+      console.log("- Data preview:", JSON.stringify(cloudRunResp.data).slice(0, 1500));
+    } else {
+      console.log("- No data in response");
+    }
+
+    if (!cloudRunResp?.data) {
+      throw new Error('Cloud Run returned empty response body');
+    }
+
+    return cloudRunResp.data;
+  } catch (error) {
+    // Enhanced error logging
+    console.error('[transcribe_recording] Cloud Run request failed:');
+    console.error('- Error message:', error.message);
+    console.error('- Error name:', error.name);
+    console.error('- Error code:', error.code);
+    console.error('- Error status:', error.status);
+    console.error('- Error stack:', error.stack);
+
+    // Try to log the full error object
+    try {
+      console.error('- Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+    } catch (errorStringifyError) {
+      console.error('- Could not stringify error:', errorStringifyError.message);
+      console.error('- Raw error object:', error);
+    }
+
+    if (error.message?.includes('aborted') || error.code === 'ECONNABORTED') {
+      throw new Error('Transcription request timed out. Please try with a shorter audio file or check your network connection.');
+    }
+
+    if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      throw new Error('Unable to connect to transcription service. Please try again later.');
+    }
+
+    throw new Error(`Cloud Run service error: ${error.message}`);
+  }
 }
 
 export default async function handler(req, res) {
