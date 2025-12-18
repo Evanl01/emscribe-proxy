@@ -38,6 +38,8 @@ function cleanRawText(s) {
     s = s.replace(/\u00A0/g, ' ');
     // Replace en-dash (–) with hyphen-minus (-)
     s = s.replace(/–/g, '-');
+    // Replace em-dash (—) with hyphen-minus (-)
+    s = s.replace(/—/g, '-');
     // Replace comparison operators with text equivalents
     s = s.replace(/≤/g, '<=');
     s = s.replace(/≥/g, '>=');
@@ -73,6 +75,8 @@ function cleanRawText(s) {
     s = s.replace(/↓/g, 'decrease');
     // Replace tilde (~) with "approximately"
     s = s.replace(/~/g, 'approximately');
+    // Replace approximate equals (≈) with tilde (~)
+    s = s.replace(/≈/g, '~');
     // Replace infinity symbol (∞) with "infinity"
     s = s.replace(/∞/g, 'infinity');
     // Remove control characters except common whitespace (tab, newline, carriage)
