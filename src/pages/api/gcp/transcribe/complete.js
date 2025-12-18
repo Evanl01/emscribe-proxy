@@ -1,7 +1,7 @@
-import { transcribe_recording } from "@/pages/api/gcp/transcribe";
-import { mask_phi } from "@/pages/api/aws/mask-phi";
+import { transcribe_recording } from "@/src/pages/api/gcp/transcribe";
+import { mask_phi } from "@/src/pages/api/aws/mask-phi";
 import { authenticateRequest } from "@/src/utils/authenticateRequest";
-import { getAllDotPhrasesForUser } from "@/pages/api/dotPhrases";
+import { getAllDotPhrasesForUser } from "@/src/pages/api/dotPhrases";
 import { getSupabaseClient } from "@/src/utils/supabase";
 
 /**
