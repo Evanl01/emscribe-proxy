@@ -27,7 +27,7 @@ export const config = {
 };
 
 
-// Helper: clean raw text from LLMs to normalize problematic characters
+// Helper: clean raw text from LLMs to normalize problematic characters for EHR systems
 function cleanRawText(s) {
     if (!s || typeof s !== 'string') return s;
     // Replace common bullet characters with a dash
@@ -36,6 +36,45 @@ function cleanRawText(s) {
     s = s.replace(/[\u2026\u22EF\u22EE]/g, '...');
     // Normalize non-breaking spaces to regular space
     s = s.replace(/\u00A0/g, ' ');
+    // Replace en-dash (–) with hyphen-minus (-)
+    s = s.replace(/–/g, '-');
+    // Replace comparison operators with text equivalents
+    s = s.replace(/≤/g, '<=');
+    s = s.replace(/≥/g, '>=');
+    // Replace multiplication symbol (×) with standard x
+    s = s.replace(/×/g, 'x');
+    // Replace common fractions with text equivalents
+    s = s.replace(/½/g, '1/2');
+    s = s.replace(/⅓/g, '1/3');
+    s = s.replace(/⅔/g, '2/3');
+    s = s.replace(/¼/g, '1/4');
+    s = s.replace(/¾/g, '3/4');
+    s = s.replace(/⅕/g, '1/5');
+    s = s.replace(/⅖/g, '2/5');
+    s = s.replace(/⅗/g, '3/5');
+    s = s.replace(/⅘/g, '4/5');
+    s = s.replace(/⅙/g, '1/6');
+    s = s.replace(/⅚/g, '5/6');
+    // Replace superscript numbers with power notation (e.g., 2² → 2^2)
+    s = s.replace(/⁰/g, '^0');
+    s = s.replace(/¹/g, '^1');
+    s = s.replace(/²/g, '^2');
+    s = s.replace(/³/g, '^3');
+    s = s.replace(/⁴/g, '^4');
+    s = s.replace(/⁵/g, '^5');
+    s = s.replace(/⁶/g, '^6');
+    s = s.replace(/⁷/g, '^7');
+    s = s.replace(/⁸/g, '^8');
+    s = s.replace(/⁹/g, '^9');
+    // Replace arrows with text equivalents
+    s = s.replace(/→/g, '->');
+    s = s.replace(/←/g, '<-');
+    s = s.replace(/↑/g, 'increase');
+    s = s.replace(/↓/g, 'decrease');
+    // Replace tilde (~) with "approximately"
+    s = s.replace(/~/g, 'approximately');
+    // Replace infinity symbol (∞) with "infinity"
+    s = s.replace(/∞/g, 'infinity');
     // Remove control characters except common whitespace (tab, newline, carriage)
     s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
     // Collapse multiple consecutive hyphens to a single one
