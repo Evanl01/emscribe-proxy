@@ -25,7 +25,7 @@ export function middleware(request) {
       if (origin && allowedOrigins.includes(origin)) {
         headers.set('Access-Control-Allow-Origin', origin)
       }
-      headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+      headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
       headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
       headers.set('Access-Control-Allow-Credentials', 'true')
       headers.set('Access-Control-Max-Age', '86400')
@@ -45,7 +45,7 @@ export function middleware(request) {
     }
 
     // Set other CORS headers
-    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
     response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
     response.headers.set('Access-Control-Allow-Credentials', 'true')
     response.headers.set('Access-Control-Max-Age', '86400')
