@@ -56,33 +56,62 @@ export default async function handler(req, res) {
             // Store original values for rollback if needed
             const originalName = patientEncounter.encrypted_name;
             
-            // Step 2: Prepare patient encounter update
+            // Step 2: Fetch recording linked to this patient encounter (needed to find transcript)
+            let recordingId = null;
+            if (transcript_text !== undefined) {
+                const { data: recording, error: recordingError } = await supabase
+                    .from(recordingTable)
+                    .select('id')
+                    .eq('patientEncounter_id', patientEncounterId)
+                    .single();
+                
+                if (recordingError) {
+                    return res.status(400).json({ error: 'No recording found for this patient encounter' });
+                }
+                recordingId = recording.id;
+            }
+            
+            // Step 3: Prepare patient encounter update
             const patientEncounterUpdate = {};
             
             if (name !== undefined) {
-                const encrypted_name = encryptionUtils.encryptText(name, aes_key, iv);
-                patientEncounterUpdate.encrypted_name = encrypted_name;
+                // Prepare encounter object for encryption (generates new IV)
+                const encounterObj = { name: name };
+                
+                // Encrypt name (generates new IV and mutates object)
+                const encryptionResult = await encryptionUtils.encryptField(encounterObj, 'name', patientEncounter.encrypted_aes_key);
+                if (!encryptionResult.success) {
+                    return res.status(500).json({ error: 'Failed to encrypt patient encounter name: ' + encryptionResult.error });
+                }
+                
+                patientEncounterUpdate.encrypted_name = encounterObj.encrypted_name;
+                patientEncounterUpdate.iv = encounterObj.iv;
                 patientEncounterUpdate.updated_at = new Date().toISOString();
             }
             
-            // Step 3: Prepare transcript update/create
+            // Step 4: Prepare transcript update/create
             let transcriptUpdate = null;
             let hasTranscriptChanges = false;
             
             if (transcript_text !== undefined) {
                 hasTranscriptChanges = true;
                 
-                if (!patientEncounter.recording_id) {
-                    return res.status(400).json({ error: 'Patient encounter has no associated recording' });
+                // Prepare transcript object for encryption (generates new IV)
+                const transcript = {
+                    transcript_text: transcript_text,
+                };
+                
+                // Encrypt transcript_text (generates new IV and mutates object)
+                const encryptionResult = await encryptionUtils.encryptField(transcript, 'transcript_text', patientEncounter.encrypted_aes_key);
+                if (!encryptionResult.success) {
+                    return res.status(500).json({ error: 'Failed to encrypt transcript: ' + encryptionResult.error });
                 }
                 
-                const encrypted_transcript_text = encryptionUtils.encryptText(transcript_text, aes_key, iv);
-                
-                // Check if transcript exists
+                // Check if transcript exists for this recording
                 const { data: existingTranscript, error: fetchTranscriptError } = await supabase
                     .from(transcriptTable)
                     .select('id')
-                    .eq('recording_id', patientEncounter.recording_id)
+                    .eq('recording_id', recordingId)
                     .single();
                 
                 // PGRST116 = no rows found (which is ok)
@@ -94,20 +123,20 @@ export default async function handler(req, res) {
                     exists: !!existingTranscript,
                     id: existingTranscript?.id,
                     data: {
-                        encrypted_transcript_text,
+                        encrypted_transcript_text: transcript.encrypted_transcript_text,
+                        iv: transcript.iv,
                         updated_at: new Date().toISOString(),
                     }
                 };
                 
                 if (!transcriptUpdate.exists) {
                     // Will be created, not updated
-                    transcriptUpdate.data.recording_id = patientEncounter.recording_id;
-                    transcriptUpdate.data.iv = iv;
+                    transcriptUpdate.data.recording_id = recordingId;
                     transcriptUpdate.data.user_id = user.id;
                 }
             }
             
-            // Step 4: Execute updates in transaction-like manner with rollback on failure
+            // Step 5: Execute updates in transaction-like manner with rollback on failure
             try {
                 // Update patient encounter if there are changes
                 if (Object.keys(patientEncounterUpdate).length > 0) {
@@ -160,7 +189,7 @@ export default async function handler(req, res) {
                     }
                 }
                 
-                // Step 5: Fetch and return updated data
+                // Step 6: Fetch and return updated data
                 const { data: updatedEncounter, error: fetchUpdatedError } = await supabase
                     .from(patientEncounterTable)
                     .select('*')
@@ -176,7 +205,7 @@ export default async function handler(req, res) {
                     const { data: transcript, error: fetchTranscriptError } = await supabase
                         .from(transcriptTable)
                         .select('*')
-                        .eq('recording_id', patientEncounter.recording_id)
+                        .eq('recording_id', recordingId)
                         .single();
                     
                     if (fetchTranscriptError && fetchTranscriptError.code !== 'PGRST116') {

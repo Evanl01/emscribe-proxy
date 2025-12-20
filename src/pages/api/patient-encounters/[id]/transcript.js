@@ -39,63 +39,64 @@ export default async function handler(req, res) {
                 return res.status(encounterResult.statusCode).json({ error: encounterResult.error });
             }
             
-            const { data: patientEncounter, aes_key, iv } = encounterResult;
+            const { data: patientEncounter } = encounterResult;
             
             if (!patientEncounter.recording_id) {
                 return res.status(400).json({ error: 'Patient encounter has no associated recording' });
             }
             
-            // Step 2: Get AES key for encryption
-            const encrypted_transcript_text = encryptionUtils.encryptText(transcript_text, aes_key, iv);
+            // Step 2: Fetch recording to get the encrypted AES key
+            const { data: recording, error: recordingError } = await supabase
+                .from(recordingTable)
+                .select('id')
+                .eq('patientEncounter_id', patientEncounterId)
+                .single();
             
-            // Step 3: Check if transcript exists for this recording
+            if (recordingError) {
+                return res.status(500).json({ error: 'Failed to fetch recording: ' + recordingError.message });
+            }
+            
+            // Step 3: Prepare transcript object for encryption with new IV
+            const transcript = {
+                transcript_text: transcript_text,
+            };
+            
+            // Encrypt transcript_text (generates new IV)
+            const encryptionResult = await encryptionUtils.encryptField(transcript, 'transcript_text', patientEncounter.encrypted_aes_key);
+            if (!encryptionResult.success) {
+                return res.status(500).json({ error: 'Failed to encrypt transcript: ' + encryptionResult.error });
+            }
+            
+            // Step 4: Check if transcript exists for this recording
             const { data: existingTranscript, error: fetchTranscriptError } = await supabase
                 .from(transcriptTable)
                 .select('id')
                 .eq('recording_id', patientEncounter.recording_id)
                 .single();
             
-            let updateResult = null;
-            let updateError = null;
-            
-            if (fetchTranscriptError && fetchTranscriptError.code !== 'PGRST116') {
-                // PGRST116 means no rows found (which is ok)
+            if (fetchTranscriptError) {
+                if (fetchTranscriptError.code === 'PGRST116') {
+                    // PGRST116 means no rows found
+                    return res.status(404).json({ error: 'No transcript to update. Create a transcript first.' });
+                }
                 return res.status(500).json({ error: 'Failed to query transcript: ' + fetchTranscriptError.message });
             }
             
-            if (existingTranscript) {
-                // Step 4a: Update existing transcript
-                console.log('Updating existing transcript with id:', existingTranscript.id);
-                ({ data: updateResult, error: updateError } = await supabase
-                    .from(transcriptTable)
-                    .update({
-                        encrypted_transcript_text,
-                        updated_at: new Date().toISOString(),
-                    })
-                    .eq('id', existingTranscript.id)
-                    .select()
-                    .single());
-                
-                if (updateError) {
-                    return res.status(500).json({ error: 'Failed to update transcript: ' + updateError.message });
-                }
-            } else {
-                // Step 4b: Create new transcript
-                console.log('Creating new transcript for recording_id:', patientEncounter.recording_id);
-                ({ data: updateResult, error: updateError } = await supabase
-                    .from(transcriptTable)
-                    .insert({
-                        recording_id: patientEncounter.recording_id,
-                        encrypted_transcript_text,
-                        iv,
-                        user_id: user.id,
-                    })
-                    .select()
-                    .single());
-                
-                if (updateError) {
-                    return res.status(500).json({ error: 'Failed to create transcript: ' + updateError.message });
-                }
+            // Step 5: Update existing transcript with new encrypted text and IV
+            console.log('Updating existing transcript with id:', existingTranscript.id);
+            const { data: updateResult, error: updateError } = await supabase
+                .from(transcriptTable)
+                .update({
+                    encrypted_transcript_text: transcript.encrypted_transcript_text,
+                    iv: transcript.iv,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', existingTranscript.id)
+                .select()
+                .single();
+            
+            if (updateError) {
+                return res.status(500).json({ error: 'Failed to update transcript: ' + updateError.message });
             }
             
             console.log('Transcript update successful:', updateResult);

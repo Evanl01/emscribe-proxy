@@ -201,7 +201,7 @@ function EditPatientEncounterInner() {
   const savePatientEncounterAndTranscript = async (id) => {
     setIsSaving(true);
     const missingFields = [];
-    if (!patientEncounterName.trim())
+    if (!previewPatientEncounterName.trim())
       missingFields.push("Patient Encounter Name");
     if (!transcript.trim()) missingFields.push("Transcript");
     if (missingFields.length > 0) {
@@ -217,7 +217,7 @@ function EditPatientEncounterInner() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          name: patientEncounterName,
+          name: previewPatientEncounterName,
           transcript_text: transcript,
         }),
         cache: "no-store",
