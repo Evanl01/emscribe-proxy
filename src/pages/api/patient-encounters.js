@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '@/src/utils/supabase';
 import { authenticateRequest } from '@/src/utils/authenticateRequest';
 import { patientEncounterSchema } from '@/src/app/schemas/patientEncounter';
+import { getPatientEncounterWithDecryptedKey } from '@/src/utils/patientEncounterUtils';
 import * as encryptionUtils from '@/src/utils/encryptionUtils';
 
 const patientEncounterTable = 'patientEncounters';
@@ -15,24 +16,17 @@ export default async function handler(req, res) {
             const id = req.query.id;
             if (!id) return res.status(400).json({ error: 'id is required' });
 
-            const { data: patientEncounterData, error: patientEncounterError } = await supabase
-                .from(patientEncounterTable)
-                .select('*')
-                .eq('id', id)
-                .single();
-
-            if (patientEncounterError) return res.status(500).json({ error: patientEncounterError.message });
-            if (!patientEncounterData.encrypted_aes_key || !patientEncounterData.iv) {
-                console.error('Missing encrypted AES key or IV for patient encounter:', id, ". Failed to decrypt data");
-                console.error('Patient Encounter Data:', patientEncounterData);
-                return res.status(400).json({ error: 'Missing encrypted AES key or IV' });
+            const result = await getPatientEncounterWithDecryptedKey(supabase, id);
+            if (!result.success) {
+                return res.status(result.statusCode).json({ error: result.error });
             }
-            const aes_key = encryptionUtils.decryptAESKey(patientEncounterData.encrypted_aes_key);
+
+            const { data: patientEncounterData, aes_key } = result;
+            
             if (patientEncounterData.encrypted_name) {
                 patientEncounterData.name = encryptionUtils.decryptText(patientEncounterData.encrypted_name, aes_key, patientEncounterData.iv);
                 delete patientEncounterData.encrypted_name;
             }
-
 
             return res.status(200).json({ success: true, patientEncounterData });
         }
@@ -64,10 +58,12 @@ export default async function handler(req, res) {
 
     // PATCH ------------------------------------------------------------------------
     if (req.method === 'PATCH') {
+        console.log('Received PATCH request with body:', req.body);
         const parseResult = patientEncounterSchema.partial().safeParse(req.body);
         if (!parseResult.success) {
             return res.status(400).json({ error: parseResult.error });
         }
+        console.log('Parsed patient encounter for update:', parseResult.data); 
         const patientEncounter = parseResult.data;
         if (!patientEncounter.id) {
             return res.status(400).json({ error: 'id is required' });

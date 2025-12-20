@@ -197,8 +197,8 @@ function EditPatientEncounterInner() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Save transcript and note
-  const savePatientEncounter = async (id) => {
+  // Save patient encounter and transcript
+  const savePatientEncounterAndTranscript = async (id) => {
     setIsSaving(true);
     const missingFields = [];
     if (!patientEncounterName.trim())
@@ -209,20 +209,14 @@ function EditPatientEncounterInner() {
       setIsSaving(false);
       return;
     }
-    // console.log("Saving patient encounter:", {
-    //   id: id,
-    //   name: patientEncounterName,
-    //   transcript_text: transcript,
-    // });
     try {
-      const response = await fetch("/api/patient-encounters", {
+      const response = await fetch(`/api/patient-encounters/${id}/update-with-transcript`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${api.getJWT()}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          id: id,
           name: patientEncounterName,
           transcript_text: transcript,
         }),
@@ -241,7 +235,8 @@ function EditPatientEncounterInner() {
         setIsSaving(false);
         return;
       }
-      // console.log("Patient encounter saved successfully:", data);
+      const data = await response.json();
+      console.log("Patient encounter saved successfully:", data);
       setIsSaving(false);
       setOpenSections((prev) => ({
         ...prev,
@@ -803,7 +798,7 @@ function EditPatientEncounterInner() {
           setTranscript={setTranscript}
           patientEncounterName={previewPatientEncounterName}
           setPatientEncounterName={setPreviewPatientEncounterName}
-          onSave={() => savePatientEncounter(patientEncounterId)}
+          onSave={() => savePatientEncounterAndTranscript(patientEncounterId)}
           isSaving={isSaving}
           errorMessage={errorMessage}
           sections={["transcript"]}

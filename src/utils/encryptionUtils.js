@@ -1,11 +1,12 @@
 import crypto from "crypto";
 
 /**
- * Decrypts a field in an object using AES key and IV, with error checking and logging.
- * Returns an object: { success, error, value }
- * @param {object} obj - The object containing encrypted data.
+ * Decrypts a field in an object and transforms it in place.
+ * Decrypts the AES key, decrypts the encrypted field, then removes sensitive data (encrypted_* fields, IV, key).
+ * @param {object} obj - The object containing encrypted data (will be mutated).
  * @param {string} field - The base field name (e.g., "name", "transcript_text").
  * @param {string|Buffer} encryptedAESKey - The RSA-encrypted AES key (base64 or Buffer).
+ * @returns {object} { success, error, value } - success=true if decryption succeeded, value contains decrypted field.
  */
 export async function decryptField(obj, field, encryptedAESKey) {
     // console.log('[decryptField]:', obj, field, encryptedAESKey);
@@ -158,6 +159,7 @@ export function encryptText(plainText, aesKey, iv) {
 
 /**
  * Decrypts AES-encrypted text using the provided IV and decrypted AES key.
+ * Low-level cryptographic operation - does not modify objects or handle field names.
  * @param {string} encryptedText - The AES-encrypted text (base64).
  * @param {Buffer|string} aesKey - The decrypted AES key (Buffer or base64 string).
  * @param {string} iv - The initialization vector (base64).
