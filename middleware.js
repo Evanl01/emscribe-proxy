@@ -8,7 +8,8 @@ export function middleware(request) {
       // Production origins
       'https://d2okt95q961mml.cloudfront.net',
       'https://enscribe-web-prod-static.s3.amazonaws.com',
-
+      'https://enscribe.sjpedgi.doctor',
+      
       // Development origins
       'http://localhost:3000',
       'http://localhost:3001',
