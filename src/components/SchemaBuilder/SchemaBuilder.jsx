@@ -55,17 +55,17 @@ export default function SchemaBuilder() {
     }
   }, [selectedFieldId]);
 
-  // Drag start from Fields Box
-  const handleDragStart = useCallback((field) => {
-    // We'll handle this in the drop handler instead
-  }, []);
-
   // Add field to preview (copy from Fields Box)
   const handleAddFieldToPreview = useCallback((field, insertBeforeIndex) => {
     const fieldCopy = { ...field };
     setPreview((prev) => {
       const newPreview = [...prev];
-      newPreview.splice(insertBeforeIndex, 0, fieldCopy);
+      // insertBeforeIndex of -1 means add to end
+      if (insertBeforeIndex === -1) {
+        newPreview.push(fieldCopy);
+      } else {
+        newPreview.splice(insertBeforeIndex, 0, fieldCopy);
+      }
       return newPreview;
     });
     setSelectedFieldId(field.id);
@@ -101,7 +101,7 @@ export default function SchemaBuilder() {
             onSelectField={handleSelectField}
             onCreateField={handleCreateField}
             onDeleteField={handleDeleteField}
-            onDragStart={handleDragStart}
+            onAddFieldToPreview={handleAddFieldToPreview}
           />
         </div>
 
@@ -121,7 +121,6 @@ export default function SchemaBuilder() {
           selectedFieldId={selectedFieldId}
           onSelectField={handleSelectField}
           onReorderFields={handleReorderFields}
-          onAddFieldToPreview={handleAddFieldToPreview}
           onRemoveFieldFromPreview={handleRemoveFieldFromPreview}
         />
       </div>

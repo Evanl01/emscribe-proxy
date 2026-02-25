@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import FieldCard from './FieldCard';
 
 /**
  * Fields Box (top-left)
  * Displays all created fields
  * - Click to select for editing
- * - Drag to copy to Preview Box
+ * - Click "+ Add to Preview" to add to Preview Box
  */
 export default function FieldsBox({
   fields,
@@ -15,10 +15,8 @@ export default function FieldsBox({
   onSelectField,
   onCreateField,
   onDeleteField,
-  onDragStart,
+  onAddFieldToPreview,
 }) {
-  const [hoveredId, setHoveredId] = useState(null);
-
   return (
     <div className="flex flex-col h-full gap-3">
       <div className="flex items-center justify-between">
@@ -42,24 +40,24 @@ export default function FieldsBox({
           </div>
         ) : (
           fields.map((field) => (
-            <div
-              key={field.id}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.effectAllowed = 'copy';
-                e.dataTransfer.setData('application/json', JSON.stringify(field));
-                onDragStart?.(field);
-              }}
-              onMouseEnter={() => setHoveredId(field.id)}
-              onMouseLeave={() => setHoveredId(null)}
-              className="group"
-            >
-              <FieldCard
-                field={field}
-                isSelected={selectedFieldId === field.id}
-                onSelect={onSelectField}
-                onDelete={onDeleteField}
-              />
+            <div key={field.id} className="group">
+              <div className="flex gap-2 items-start">
+                <div className="flex-1 min-w-0">
+                  <FieldCard
+                    field={field}
+                    isSelected={selectedFieldId === field.id}
+                    onSelect={onSelectField}
+                    onDelete={onDeleteField}
+                  />
+                </div>
+                <button
+                  onClick={() => onAddFieldToPreview(field, -1)}
+                  className="flex-shrink-0 mt-1 px-2 py-1 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors whitespace-nowrap"
+                  title="Add to preview"
+                >
+                  + Add
+                </button>
+              </div>
             </div>
           ))
         )}
