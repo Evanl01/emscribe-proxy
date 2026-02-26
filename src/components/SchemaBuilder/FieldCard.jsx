@@ -3,6 +3,20 @@
 import React from 'react';
 
 /**
+ * Get left border color based on depth level
+ */
+const getDepthBorderColor = (depth) => {
+  const depthColors = {
+    1: '#3b82f6', // blue-500
+    2: '#22c55e', // green-500
+    3: '#f59e0b', // amber-500
+    4: '#ef4444', // red-500
+    5: '#000000', // black
+  };
+  return depthColors[Math.min(Math.max(depth || 1, 1), 5)];
+};
+
+/**
  * Reusable field card component
  * Used in both Fields Box and Preview Box
  */
@@ -32,22 +46,25 @@ export default function FieldCard({
         onSelect?.(field.id);
       }}
       className={`
-        relative p-3 border-2 rounded-lg cursor-pointer transition-all
-        ${isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-white'}
-        ${isDragOver ? 'bg-blue-100 border-blue-400' : ''}
+        relative rounded-lg cursor-pointer transition-all h-fit
+        ${isSelected ? 'pl-3 pr-1 py-2 border border-blue-500 bg-blue-50' : 'pl-3 pr-1 py-2 bg-white'}
+        ${isDragOver ? 'bg-blue-100 border border-blue-400' : ''}
         ${isDragSource ? 'opacity-50' : ''}
-        hover:border-gray-400 hover:shadow-sm
+        hover:shadow-sm
       `}
+      style={{
+        borderLeft: `4px solid ${getDepthBorderColor(field.depth)}`,
+      }}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-gray-900 truncate">{field.name}</div>
-          {field.depth && (
+          {isSelected && field.depth && (
             <div className="text-xs text-gray-500">Depth: {field.depth}</div>
           )}
-          {field.description && (
-            <div className="text-xs text-gray-600 mt-1 line-clamp-2">
-              {field.description}
+          {isSelected && field.description && (
+            <div className="text-xs text-gray-600 mt-1 line-clamp-1">
+              Description: {field.description}
             </div>
           )}
           {field.required && (

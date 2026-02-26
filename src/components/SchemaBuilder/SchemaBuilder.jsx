@@ -3,7 +3,6 @@
 import React, { useState, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import FieldsBox from './FieldsBox';
-import FieldEditor from './FieldEditor';
 import PreviewBox from './PreviewBox';
 
 /**
@@ -22,9 +21,13 @@ export default function SchemaBuilder() {
 
   // Create new field
   const handleCreateField = useCallback(() => {
+    // Clear selection first (reset editor)
+    setSelectedFieldId(null);
+    
+    // Then create new field and set it as selected
     const newField = {
       id: uuidv4(),
-      name: 'new_field',
+      name: '',
       depth: 1,
       description: '',
       required: false,
@@ -89,40 +92,47 @@ export default function SchemaBuilder() {
     setSelectedFieldId(fieldId);
   }, []);
 
-  return (
-    <div className="h-[calc(100vh-120px)] flex gap-4">
-      {/* Left column (50%) - split into top and bottom */}
-      <div className="w-1/2 flex flex-col gap-4">
-        {/* Top left - Fields Box */}
-        <div className="flex-1 border rounded-lg p-4 bg-white overflow-hidden">
-          <FieldsBox
-            fields={fields}
-            selectedFieldId={selectedFieldId}
-            onSelectField={handleSelectField}
-            onCreateField={handleCreateField}
-            onDeleteField={handleDeleteField}
-            onAddFieldToPreview={handleAddFieldToPreview}
-          />
-        </div>
+  // Check if a field is already in preview
+  const isFieldInPreview = (fieldId) => {
+    return preview.some((f) => f.id === fieldId);
+  };
 
-        {/* Bottom left - Field Editor */}
-        <div className="flex-1 border rounded-lg p-4 bg-white overflow-hidden">
-          <FieldEditor
+  // Add new field to preview (after "Add to Schema" button clicked)
+  const handleAddToSchema = useCallback(() => {
+    if (selectedField && selectedField.name && selectedField.name.trim().length > 0) {
+      const fieldCopy = { ...selectedField };
+      setPreview((prev) => [...prev, fieldCopy]);
+      // Reset the editor form
+      setSelectedFieldId(null);
+    }
+  }, [selectedField]);
+
+  return (
+    <div className="h-full flex gap-4 flex-col md:flex-row">
+      {/* Left column (50%) - Fields CRUD Box */}
+      <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 border rounded-lg p-4 bg-white overflow-hidden flex flex-col">
+          <FieldsBox
             selectedField={selectedField}
+            isFieldInPreview={isFieldInPreview}
+            onCreateField={handleCreateField}
             onUpdateField={handleUpdateField}
+            onAddToSchema={handleAddToSchema}
           />
         </div>
       </div>
 
       {/* Right column (50%) - Preview Box */}
-      <div className="w-1/2">
-        <PreviewBox
-          preview={preview}
-          selectedFieldId={selectedFieldId}
-          onSelectField={handleSelectField}
-          onReorderFields={handleReorderFields}
-          onRemoveFieldFromPreview={handleRemoveFieldFromPreview}
-        />
+      <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 border rounded-lg p-4 bg-white overflow-hidden flex flex-col">
+          <PreviewBox
+            preview={preview}
+            selectedFieldId={selectedFieldId}
+            onSelectField={handleSelectField}
+            onReorderFields={handleReorderFields}
+            onRemoveFieldFromPreview={handleRemoveFieldFromPreview}
+          />
+        </div>
       </div>
     </div>
   );

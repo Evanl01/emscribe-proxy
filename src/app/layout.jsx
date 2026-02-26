@@ -10,11 +10,11 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" style={{ height: '100%' }}>
       <body style={{ 
+        height: '100%',
         margin: 0, 
         padding: 0, 
-        minHeight: '100vh',
         display: 'flex',
         flexDirection: 'column',
         width: '100%' 
@@ -27,7 +27,8 @@ export default function RootLayout({ children }) {
           paddingBottom: '1.5rem',
           paddingLeft: '1rem',
           paddingRight: '1rem',
-          boxSizing: 'border-box'
+          boxSizing: 'border-box',
+          minHeight: 0
         }}>
           {children}
         </main>
