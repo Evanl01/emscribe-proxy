@@ -251,7 +251,7 @@ const Header = () => {
       items: [
         // { name: "New Soap Note", path: "/new-soap-note" },
         { name: "Dot Phrases", path: "/dot-phrases" },
-        { name: "Response Schema", path: "/new-response-schema" },
+        { name: "LLM Response Template", path: "/new-llm-response-template" },
       ],
     },
   ];
